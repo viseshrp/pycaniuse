@@ -1,0 +1,14 @@
+{
+  "_output_dir": "/Users/viseshprasad/Documents/GitHub",
+  "_template": "gh:cjolowicz/cookiecutter-hypermodern-python",
+  "author": "Visesh Prasad",
+  "copyright_year": "2022",
+  "development_status": "Development Status :: 3 - Alpha",
+  "email": "viseshrprasad@gmail.com",
+  "friendly_name": "Pycaniuse",
+  "github_user": "viseshrp",
+  "license": "MIT",
+  "package_name": "pycaniuse",
+  "project_name": "pycaniuse",
+  "version": "0.0.0"
+}
