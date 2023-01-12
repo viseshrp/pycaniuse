@@ -5,17 +5,17 @@ build:
 	rm -rf build
 
 install:
-	pip uninstall workedon -y
+	pip uninstall pycaniuse -y
 	pip install dist/*.whl
 
 install-dev:
-	pip uninstall workedon -y
+	pip uninstall pycaniuse -y
 	pip install -e .
 	pip install -r requirements-dev.txt
 
 smoketest:
-	workedon --help
-	workedon --version
+	caniuse --help
+	caniuse --version
 
 clean:
 	rm -rf dist build

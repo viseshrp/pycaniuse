@@ -18,7 +18,7 @@ def get_file_text(file_name):
 
 
 _init = {}
-_init_file = os.path.join(curr_dir, "workedon", "__init__.py")
+_init_file = os.path.join(curr_dir, "pycaniuse", "__init__.py")
 with open(_init_file) as fp:
     exec(fp.read(), _init)
 name = _init["__name__"]

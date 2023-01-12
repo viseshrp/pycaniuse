@@ -1,4 +1,4 @@
-"""Top-level package for workedon."""
+"""Top-level package for pycaniuse."""
 
 __author__ = "Visesh Prasad"
 __email__ = "viseshrprasad@gmail.com"
