@@ -2,9 +2,11 @@ SHELL := bash
 .SHELLFLAGS := -e -x -c
 
 .PHONY: install
-install: ## Set up environment
-	@echo "🚀 Creating virtual environment using uv"
-	uv sync --group dev --frozen
+install: ## 🚀 Set up environment and install project
+	@echo "🚀 Syncing dependencies with uv..."
+	uv sync
+	@echo "🔧 Installing project in editable mode..."
+	uv pip install -e .
 
 check-version:
 	@echo "🔍 Checking if a Git tag exists..."

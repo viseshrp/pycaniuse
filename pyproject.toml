@@ -62,6 +62,9 @@ packages = ["caniuse"]
 [tool.hatch.build.targets.editable]
 packages = ["caniuse"]
 
+[tool.uv]
+default-groups = "all"
+
 [tool.mypy]
 files = [
     "caniuse"
