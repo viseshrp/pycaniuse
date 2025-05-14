@@ -1,0 +1,24 @@
+{
+  "template": "https://github.com/viseshrp/yapc",
+  "commit": "2b194c0b98cba1ec93bff978eee3a0018bddd323",
+  "checkout": null,
+  "context": {
+    "cookiecutter": {
+      "author": "Visesh Prasad",
+      "email": "viseshrprasad@gmail.com",
+      "github_username": "viseshrp",
+      "pypi_username": "viseshrp",
+      "project_name": "pycaniuse",
+      "project_slug": "caniuse",
+      "project_description": "Query caniuse.com from the terminal",
+      "cli_tool": "y",
+      "codecov": "y",
+      "git_init": "y",
+      "github_actions": "y",
+      "publish_to_pypi": "y",
+      "_template": "https://github.com/viseshrp/yapc",
+      "_commit": "2b194c0b98cba1ec93bff978eee3a0018bddd323"
+    }
+  },
+  "directory": null
+}
