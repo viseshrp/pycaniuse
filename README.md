@@ -1,7 +1,7 @@
 # pycaniuse
 
-[![PyPI version](https://img.shields.io/pypi/v/caniuse.svg)](https://pypi.org/project/caniuse/)
-[![Python versions](https://img.shields.io/pypi/pyversions/caniuse.svg?logo=python&logoColor=white)](https://pypi.org/project/caniuse/)
+[![PyPI version](https://img.shields.io/pypi/v/pycaniuse.svg)](https://pypi.org/project/pycaniuse/)
+[![Python versions](https://img.shields.io/pypi/pyversions/pycaniuse.svg?logo=python&logoColor=white)](https://pypi.org/project/pycaniuse/)
 [![CI](https://github.com/viseshrp/pycaniuse/actions/workflows/main.yml/badge.svg)](https://github.com/viseshrp/pycaniuse/actions/workflows/main.yml)
 [![Coverage](https://codecov.io/gh/viseshrp/pycaniuse/branch/main/graph/badge.svg)](https://codecov.io/gh/viseshrp/pycaniuse)
 [![License: MIT](https://img.shields.io/github/license/viseshrp/pycaniuse)](https://github.com/viseshrp/pycaniuse/blob/main/LICENSE)
