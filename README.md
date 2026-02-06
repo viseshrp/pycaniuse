@@ -1,57 +1,57 @@
 # pycaniuse
 
-[![PyPI version](https://img.shields.io/pypi/v/pycaniuse.svg)](https://pypi.org/project/pycaniuse/)
-[![Python versions](https://img.shields.io/pypi/pyversions/pycaniuse.svg?logo=python&logoColor=white)](https://pypi.org/project/pycaniuse/)
-[![CI](https://github.com/viseshrp/pycaniuse/actions/workflows/main.yml/badge.svg)](https://github.com/viseshrp/pycaniuse/actions/workflows/main.yml)
-[![Coverage](https://codecov.io/gh/viseshrp/pycaniuse/branch/main/graph/badge.svg)](https://codecov.io/gh/viseshrp/pycaniuse)
-[![License: MIT](https://img.shields.io/github/license/viseshrp/pycaniuse)](https://github.com/viseshrp/pycaniuse/blob/main/LICENSE)
-[![Code Style: Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://black.readthedocs.io/en/stable/)
-[![Lint: Ruff](https://img.shields.io/badge/lint-ruff-000000.svg)](https://docs.astral.sh/ruff/)
-[![Typing: mypy](https://img.shields.io/badge/typing-checked-blue.svg)](https://mypy.readthedocs.io/en/stable/)
+`pycaniuse` provides a fast terminal CLI (`caniuse`) for querying [caniuse.com](https://caniuse.com) via HTML scraping.
 
-> Query caniuse.com from the terminal
+## Requirements
 
-![Demo](https://raw.githubusercontent.com/viseshrp/pycaniuse/main/demo.gif)
+- Python 3.9+
+- Network access to `https://caniuse.com`
 
-## 🚀 Why this project exists
-
-Explain the problem this tool solves or the goal it's intended to fulfill.
-
-## 🧠 How this project works
-
-Explain how the tool works.
-
-## 📐 Requirements
-
-* Python >= 3.9
-
-## 📦 Installation
+## Install
 
 ```bash
 pip install pycaniuse
 ```
 
-## 🧪 Usage
-
-* To view the help message, run the following command:
+## Usage
 
 ```bash
-pycaniuse --help
+caniuse flexbox
+caniuse "css grid"
+caniuse flexbox-gap --full
 ```
 
-## 🛠️ Features
+## Flow
 
-* Does stuff
+- Phase A: fetch search results, parse matches, resolve selection.
+- Phase B: fetch feature page, parse details, render basic or full mode.
 
-## 🧾 Changelog
+## Full Mode Keybindings
 
-See [CHANGELOG.md](https://github.com/viseshrp/pycaniuse/blob/main/CHANGELOG.md)
+- `Left`/`Right`: switch tabs
+- `1-9`: jump to tab index
+- `Up`/`Down`: scroll tab content
+- `PageUp`/`PageDown`: faster scroll
+- `Home`/`End`: top/bottom
+- `q` or `Esc`: quit
 
-## 🙏 Credits
+## Debugging
 
-* [Click](https://click.palletsprojects.com), for enabling delightful CLI development.
-* Inspired by [Simon Willison](https://github.com/simonw)'s work.
+Set `PYCANIUSE_DEBUG=1` to print parser diagnostics to stderr.
 
-## 📄 License
+## Limitations
 
-MIT © [Visesh Prasad](https://github.com/viseshrp)
+- The parser depends on caniuse HTML structure.
+- No offline support or persistent cache.
+- No disk writes for runtime data.
+
+## Docker
+
+```bash
+docker build -t pycaniuse .
+docker run --rm -it pycaniuse flexbox
+```
+
+## License
+
+MIT
