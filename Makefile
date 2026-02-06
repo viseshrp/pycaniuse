@@ -35,7 +35,7 @@ check: ## Run all code quality checks
 .PHONY: test
 test: ## Run tests using tox
 	@echo "🚀 Testing code: Running tox across Python versions"
-	tox
+	uv run tox
 
 .PHONY: test-local
 test-local: ## Run tests in current Python environment using uv

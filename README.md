@@ -4,7 +4,7 @@
 
 ## Requirements
 
-- Python 3.9+
+- Python 3.10+
 - Network access to `https://caniuse.com`
 
 ## Install

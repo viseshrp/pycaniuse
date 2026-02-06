@@ -5,13 +5,12 @@ description = "Query caniuse.com from the terminal"
 authors = [{ name = "Visesh Prasad", email = "viseshrprasad@gmail.com" }]
 readme = "README.md"
 keywords = ["python"]
-requires-python = ">=3.9,<4.0"
+requires-python = ">=3.10,<4.0"
 dependencies = [
     "click>=8.1.1",
     "rich>=13.7.0",
     "justhtml>=0.1.5",
     "httpx>=0.27.0",
-    "typing-extensions>=4.9.0",
 ]
 license = { text = "MIT" }
 classifiers = [
@@ -24,7 +23,6 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -45,7 +43,7 @@ caniuse = "caniuse.__main__:main"
 [dependency-groups]
 dev = [
     "ipdb",
-    "uv",
+    "uv>=0.9.6",
     "tox",
     "tox-uv",
     "tox-gh-actions",
@@ -63,6 +61,8 @@ dev = [
     "cogapp",
     "twine",
     "hatch",
+    "virtualenv>=20.36.1",
+    "filelock>=3.20.3",
 ]
 
 [build-system]
@@ -161,7 +161,7 @@ source = [
 show_contexts = true
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py310"
 line-length = 100
 fix = true
 unsafe-fixes = true
@@ -223,7 +223,7 @@ force-sort-within-sections = true
 
 [tool.black]
 line-length = 100
-target-version = ["py39"]
+target-version = ["py310"]
 
 [tool.codespell]
 ignore-words = "codespell.txt"
