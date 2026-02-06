@@ -9,7 +9,7 @@ PHASE 0 — Scaffold & packaging
 
 0.1 Repository layout (Python-only)
 - pyproject.toml
-- src/pycaniuse/
+- caniuse/
   - __init__.py
   - cli.py
   - http.py
@@ -17,10 +17,14 @@ PHASE 0 — Scaffold & packaging
   - parse_search.py
   - parse_feature.py
   - render_basic.py
-  - ui_select.py
-  - ui_fullscreen.py
-  - util_text.py        (wrapping, stripping, percent parsing, etc.)
-  - util_html.py        (selector helpers + debug hooks)
+  - ui/
+    - __init__.py
+    - select.py
+    - fullscreen.py
+  - util/
+    - __init__.py
+    - text.py         (wrapping, stripping, percent parsing, etc.)
+    - html.py         (selector helpers + debug hooks)
 - README.md
 
 0.2 Dependencies (Python)
@@ -102,7 +106,7 @@ If only one match:
 If multiple matches:
 - show Rich selector.
 
-2.3 ui_select.py: interactive selection list
+2.3 ui/select.py: interactive selection list
 - Render each option as:
   • <title>  /<slug>
 - Keys:
@@ -334,7 +338,7 @@ PHASE 5 — Rendering + UI (Full mode)
   3) Sub-features
   + optional future tabs if discovered
 
-5.2 ui_fullscreen.py: full-screen interactive app loop
+5.2 ui/fullscreen.py: full-screen interactive app loop
 State:
 - selected_tab_idx: int
 - scroll_offset: int (for tab content pane)
