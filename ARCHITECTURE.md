@@ -83,7 +83,7 @@
 ### 3.1 Package Structure (aligned with Implementation Plan Phase 0)
 
 ```
-src/pycaniuse/
+caniuse/
 ├── __init__.py
 ├── cli.py              # CLI entry point
 ├── http.py             # HTTP client
@@ -91,10 +91,14 @@ src/pycaniuse/
 ├── parse_search.py     # Search results parser
 ├── parse_feature.py    # Feature detail parser
 ├── render_basic.py     # Basic mode rendering
-├── ui_select.py        # Selection UI
-├── ui_fullscreen.py    # Full-screen interactive UI
-├── util_text.py        # Text utilities (wrapping, percent parsing)
-└── util_html.py        # HTML utilities (selector helpers, debug hooks)
+├── ui/
+│   ├── __init__.py
+│   ├── select.py       # Selection UI
+│   └── fullscreen.py   # Full-screen interactive UI
+└── util/
+    ├── __init__.py
+    ├── text.py         # Text utilities (wrapping, percent parsing)
+    └── html.py         # HTML utilities (selector helpers, debug hooks)
 ```
 
 ### 3.2 Module Map
@@ -106,11 +110,11 @@ src/pycaniuse/
 | `parse_search.py` | Parse search results HTML (S1/S2 strategies) | Phase 2 |
 | `parse_feature.py` | Parse feature detail HTML (basic + full) | Phase 3, 5 |
 | `model.py` | Data model definitions | Phase 3 |
-| `ui_select.py` | Interactive search result selector | Phase 2 |
+| `ui/select.py` | Interactive search result selector | Phase 2 |
 | `render_basic.py` | Basic mode rendering | Phase 4 |
-| `ui_fullscreen.py` | Full-screen interactive UI | Phase 5 |
-| `util_text.py` | Text wrapping, percent parsing, whitespace normalization | Phase 3 |
-| `util_html.py` | Selector helpers, debug hooks | Phase 3, 6 |
+| `ui/fullscreen.py` | Full-screen interactive UI | Phase 5 |
+| `util/text.py` | Text wrapping, percent parsing, whitespace normalization | Phase 3 |
+| `util/html.py` | Selector helpers, debug hooks | Phase 3, 6 |
 
 ### 3.3 Detailed Module Responsibilities
 
@@ -230,7 +234,7 @@ Data Classes:
     └── tabs: dict[str, str]  # rendered text per available tab
 ```
 
-#### `ui_select.py` — Selection UI
+#### `ui/select.py` — Selection UI
 
 ```
 Responsibilities:
@@ -257,7 +261,7 @@ Responsibilities:
 └── Hint line: "Run with --full to see all browsers + Notes/Resources/Sub-features."
 ```
 
-#### `ui_fullscreen.py` — Full-Screen Interactive UI
+#### `ui/fullscreen.py` — Full-Screen Interactive UI
 
 ```
 Responsibilities:
@@ -270,7 +274,7 @@ Responsibilities:
 └── Render all browsers with dense layout
 ```
 
-#### `util_text.py` — Text Utilities
+#### `util/text.py` — Text Utilities
 
 ```
 Responsibilities:
@@ -281,7 +285,7 @@ Responsibilities:
 └── String stripping and cleaning
 ```
 
-#### `util_html.py` — HTML Utilities
+#### `util/html.py` — HTML Utilities
 
 ```
 Responsibilities:
@@ -851,7 +855,7 @@ This architecture maps directly to the Implementation Plan phases:
 
 | Phase | Modules | Architecture Section |
 |-------|---------|---------------------|
-| **Phase 0** | Package structure (`src/pycaniuse/`) | §3.1 Package Structure |
+| **Phase 0** | Package structure (`caniuse/`) | §3.1 Package Structure |
 | **Phase 1** | `http.py` | §3.3 (http.py), §4.1-4.2 (data flow) |
 | **Phase 2** | `parse_search.py`, `ui_select.py`, `cli.py` | §3.3, §4.1, §6 |
 | **Phase 3** | `model.py`, `parse_feature.py`, `util_text.py`, `util_html.py` | §3.3, §5 |
