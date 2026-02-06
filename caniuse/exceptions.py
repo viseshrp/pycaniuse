@@ -1,13 +1,9 @@
-"""
-caniuse.exceptions
------------------------
-All exceptions used in the code base are defined here.
-"""
+"""All exceptions used in the code base are defined here."""
 
 from __future__ import annotations
 
 
-class CustomException(Exception):
+class CustomError(Exception):
     """
     Base exception. All other exceptions
     inherit from here.

@@ -1,3 +1,5 @@
+"""The version module for the pycaniuse package."""
+
 from importlib.metadata import PackageNotFoundError, version
 
 try:

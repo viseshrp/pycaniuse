@@ -1,4 +1,4 @@
-"""Console script for caniuse."""
+"""The console script for pycaniuse."""
 
 import click
 

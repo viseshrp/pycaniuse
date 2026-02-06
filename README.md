@@ -21,9 +21,9 @@ Explain the problem this tool solves or the goal it's intended to fulfill.
 
 Explain how the tool works.
 
-## 🛠️ Features
+## 📐 Requirements
 
-* Does stuff
+* Python >= 3.9
 
 ## 📦 Installation
 
@@ -39,9 +39,9 @@ pip install pycaniuse
 pycaniuse --help
 ```
 
-## 📐 Requirements
+## 🛠️ Features
 
-* Python >= 3.9
+* Does stuff
 
 ## 🧾 Changelog
 

@@ -1,0 +1,16 @@
+diff a/CHANGELOG.md b/CHANGELOG.md	(rejected hunks)
+@@ -23,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
+ 
+ -
+ 
++### Fixed
++
++-
++
++## Security
++
++-
++
+ ## [0.0.1] - <date>
+ 
+ ### Added

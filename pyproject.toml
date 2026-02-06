@@ -9,7 +9,13 @@ requires-python = ">=3.9,<4.0"
 dependencies = ["click>=8.1.1", ]
 license = { text = "MIT" }
 classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
     "Intended Audience :: Developers",
+    "Environment :: Console",
+    "Topic :: Software Development :: Libraries :: Python Modules",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
@@ -17,50 +23,71 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
 [project.urls]
 Homepage = "https://github.com/viseshrp/pycaniuse"
 Repository = "https://github.com/viseshrp/pycaniuse"
 Documentation = "https://github.com/viseshrp/pycaniuse/blob/main/README.md"
+Changelog = "https://github.com/viseshrp/pycaniuse/blob/main/CHANGELOG.md"
+Bug-Tracker = "https://github.com/viseshrp/pycaniuse/issues"
+CI = "https://github.com/viseshrp/pycaniuse/actions"
 
 [project.scripts]
-caniuse = "caniuse.cli:main"
+caniuse = "caniuse.__main__:main"
 
 [dependency-groups]
 dev = [
-    "pre-commit>=4.2.0",
-    "uv>=0.6.17",
-    "tox>=4.25.0",
-    "tox-uv>=1.25.0",
-    "tox-gh-actions>=3.3.0",
-    "mypy>=1.15.0",
-    "deptry>=0.23.0",
-    "pytest>=8.3.5",
-    "pytest-cov>=6.1.1",
-    "vulture>=2.14",
-    "cogapp>=3.4.1",
-    "ipdb>=0.13.13",
+    "ipdb",
+    "uv",
+    "tox",
+    "tox-uv",
+    "tox-gh-actions",
+    "pytest",
+    "pytest-cov",
+    "pre-commit",
+    "black",
+    "ruff",
+    "pip-audit",
+    "bandit[toml]",
+    "codespell",
+    "mypy",
+    "vulture",
+    "deptry",
+    "cogapp",
+    "twine",
+    "hatch",
 ]
 
 [build-system]
-requires = ["hatchling", "hatch-vcs"]
+requires = ["hatchling", "hatch-timestamp-version"]
 build-backend = "hatchling.build"
 
 [tool.hatch.version]
-source = "vcs"
 path = "caniuse/_version.py"
+source = "vcs-dev-timestamp"
+validate-bump = true
 
 [tool.hatch.version.raw-options]
 local_scheme = "no-local-version"
-version_scheme = "guess-next-dev"
+timestamp_format = "long"
+
+[tool.hatch.build]
+include = [
+  "caniuse/**",
+  "README.md",
+  "LICENSE",
+  "CHANGELOG.md"
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["caniuse"]
 
 [tool.hatch.build.targets.editable]
 packages = ["caniuse"]
+
+[tool.hatch.envs.default]
+path = ".venv"
 
 [tool.uv]
 default-groups = "all"
@@ -129,11 +156,13 @@ show_contexts = true
 
 [tool.ruff]
 target-version = "py39"
-line-length = 120
+line-length = 100
 fix = true
+unsafe-fixes = true
 exclude = [".venv", "__init__.py"]
 
 [tool.ruff.lint]
+fixable = ["ALL"]
 select = [
     # flake8-2020
     "YTT",
@@ -155,6 +184,8 @@ select = [
     "C90",
     # pycodestyle
     "E", "W",
+    # pep8-naming rules
+    "N",
     # pyflakes
     "F",
     # pygrep-hooks
@@ -165,6 +196,8 @@ select = [
     "RUF",
     # try/except linting
     "TRY",
+    # Disallow print statements
+    "T201",
 ]
 ignore = [
     "C901", # Function is too complex
@@ -176,14 +209,15 @@ max-complexity = 10
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]
-
-[tool.black]
-line-length = 100
-target-version = ["py39"]
+"scripts/*.py" = ["T201"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["caniuse", "tests"]
 force-sort-within-sections = true
+
+[tool.black]
+line-length = 100
+target-version = ["py39"]
 
 [tool.codespell]
 ignore-words = "codespell.txt"
@@ -191,12 +225,17 @@ skip = '*.pyc,*.xml,*.gif,*.png,*.jpg,*.js,*.html,*.json,*.gz,Makefile'
 quiet-level = 3
 
 [tool.bandit]
-targets = ["caniuse", ]
-recursive = true
-number = 3
-severity_level = "high"
-require_serial = true
-exclude_dirs = ["venv/*", ".venv/*", "tests/*"]
+targets = ["caniuse"]
+exclude_dirs = ["venv", ".venv", "tests"]
+
+[tool.vulture]
+paths = ["caniuse", "tests"]
+min_confidence = 80
+sort_by_size = true
+exclude = ["venv/", ".venv/"]
+
+[tool.deptry]
+exclude = ["venv/.*", ".venv/.*", "tests/.*"]
 
 [tool.pre-commit.default_language_versions]
-python = "3.11"
+python = "3.13"

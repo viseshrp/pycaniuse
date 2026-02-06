@@ -19,9 +19,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0  # Required for hatch-vcs to generate full version
+          fetch-tags: true
           ref: main
           token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
-          fetch-depth: 0
 
       - name: Cache pre-commit hooks
         uses: actions/cache@v4
@@ -32,19 +33,15 @@ jobs:
       - name: Set up Python + Environment
         uses: ./.github/actions/setup-python-env
 
-      - name: Create or switch to update branch
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git fetch origin main
-          git checkout -B chore/pre-commit-update origin/main
-
       - name: Run pre-commit autoupdate
         run: uv run pre-commit autoupdate
         continue-on-error: true
 
       - name: Run pre-commit checks
         run: make check
+
+      - name: Show updated hooks (if any)
+        run: git diff .pre-commit-config.yaml || true
 
       - name: Commit changes
         run: |
