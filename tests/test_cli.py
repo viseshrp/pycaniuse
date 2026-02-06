@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from click.testing import CliRunner
+from pytest import MonkeyPatch
 
 from caniuse import __version__, cli
 from caniuse.model import FeatureBasic, SearchMatch
@@ -20,7 +21,7 @@ def test_version() -> None:
     assert __version__ in result.output
 
 
-def test_no_matches_exit_nonzero(monkeypatch) -> None:
+def test_no_matches_exit_nonzero(monkeypatch: MonkeyPatch) -> None:
     runner = CliRunner()
     monkeypatch.setattr(cli, "fetch_search_page", lambda query: "<html></html>")
     monkeypatch.setattr(cli, "parse_search_results", lambda html: [])
@@ -31,7 +32,7 @@ def test_no_matches_exit_nonzero(monkeypatch) -> None:
     assert "No matches found" in result.output
 
 
-def test_exact_slug_shortcut_skips_selector(monkeypatch) -> None:
+def test_exact_slug_shortcut_skips_selector(monkeypatch: MonkeyPatch) -> None:
     runner = CliRunner()
 
     monkeypatch.setattr(cli, "fetch_search_page", lambda query: "search")
@@ -63,7 +64,7 @@ def test_exact_slug_shortcut_skips_selector(monkeypatch) -> None:
 
     called = {"selector": False}
 
-    def _selector(_matches):
+    def _selector(_matches: list[SearchMatch]) -> None:
         called["selector"] = True
         return None
 

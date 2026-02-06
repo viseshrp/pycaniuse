@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 import os
 import select
 import sys
 import termios
 import tty
-from contextlib import contextmanager
 
 from rich.console import Console, Group
 from rich.live import Live
@@ -20,7 +21,7 @@ from ..util.text import wrap_lines
 
 
 @contextmanager
-def _raw_mode(enabled: bool):
+def _raw_mode(enabled: bool) -> Iterator[None]:
     if not enabled:
         yield
         return
@@ -37,11 +38,11 @@ def _read_key(timeout: float = 0.2) -> str | None:
     if os.name == "nt":  # pragma: no cover
         import msvcrt
 
-        if not msvcrt.kbhit():
+        if not msvcrt.kbhit():  # type: ignore[attr-defined]
             return None
-        key = msvcrt.getwch()
+        key: str = msvcrt.getwch()  # type: ignore[attr-defined]
         if key in {"\x00", "\xe0"}:
-            second = msvcrt.getwch()
+            second: str = msvcrt.getwch()  # type: ignore[attr-defined]
             return {
                 "H": "up",
                 "P": "down",
@@ -142,7 +143,10 @@ def run_fullscreen(feature: FeatureFull) -> None:
             console.print(f"\n[{tab_name}]\n{feature_tabs.get(tab_name, '')}")
         return
 
-    with _raw_mode(enabled=(os.name != "nt")), Live(console=console, screen=True, refresh_per_second=20) as live:
+    with (
+        _raw_mode(enabled=(os.name != "nt")),
+        Live(console=console, screen=True, refresh_per_second=20) as live,
+    ):
         while True:
             width = console.size.width
             height = console.size.height
@@ -194,7 +198,9 @@ def run_fullscreen(feature: FeatureFull) -> None:
             group = Group(
                 Panel(Group(*header_lines), border_style="blue", title=f"/{feature.slug}"),
                 Panel(
-                    Text("\n".join(support_lines[support_scroll_offset : support_scroll_offset + 8])),
+                    Text(
+                        "\n".join(support_lines[support_scroll_offset : support_scroll_offset + 8])
+                    ),
                     title="Support",
                     border_style="cyan",
                 ),

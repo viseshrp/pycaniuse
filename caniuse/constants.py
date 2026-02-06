@@ -31,8 +31,6 @@ STATUS_LABEL_MAP: Final[dict[str, str]] = {
 }
 
 PARSE_WARNING_LINE: Final[str] = "Some sections could not be parsed (site layout may have changed)."
-FULL_MODE_HINT: Final[str] = (
-    "Run with --full to see all browsers + Notes/Resources/Sub-features."
-)
+FULL_MODE_HINT: Final[str] = "Run with --full to see all browsers + Notes/Resources/Sub-features."
 
 DEFAULT_TIMEOUT_SECONDS: Final[float] = 10.0

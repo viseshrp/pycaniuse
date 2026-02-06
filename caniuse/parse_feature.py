@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from typing import Literal, cast
 
 from .constants import BASE_URL, BASIC_MODE_BROWSERS
 from .model import BrowserSupportBlock, FeatureBasic, FeatureFull, SupportRange
-from .util.html import all_nodes, attr, class_tokens, first, markdown_text, parse_document, safe_join_url, text
+from .util.html import (
+    all_nodes,
+    attr,
+    class_tokens,
+    first,
+    markdown_text,
+    parse_document,
+    safe_join_url,
+    text,
+)
 from .util.text import parse_percent
 
 _STATUS_CLASS_ORDER = ("y", "n", "a", "u")
@@ -84,10 +94,10 @@ def _parse_support_blocks(doc: object, *, include_all: bool) -> list[BrowserSupp
         ranges: list[SupportRange] = []
         for stat_cell in all_nodes(support, "ol > li.stat-cell"):
             classes = class_tokens(stat_cell)
-            status = "u"
+            status: Literal["y", "n", "a", "u"] = "u"
             for token in _STATUS_CLASS_ORDER:
                 if token in classes:
-                    status = token
+                    status = cast(Literal["y", "n", "a", "u"], token)
                     break
 
             range_text = text(stat_cell)
@@ -195,7 +205,7 @@ def parse_feature_full(html: str, slug: str) -> FeatureFull:
     resources = _parse_resources(doc)
     subfeatures = _parse_subfeatures(doc)
 
-    tabs: "OrderedDict[str, str]" = OrderedDict()
+    tabs: OrderedDict[str, str] = OrderedDict()
     if notes_text:
         tabs["Notes"] = notes_text
     if resources:

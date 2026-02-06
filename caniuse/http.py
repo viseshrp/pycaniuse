@@ -32,24 +32,26 @@ def fetch_html(
         retry_once = True
         while True:
             try:
-                with httpx.Client(timeout=timeout, follow_redirects=True, headers=_build_headers()) as client:
+                with httpx.Client(
+                    timeout=timeout, follow_redirects=True, headers=_build_headers()
+                ) as client:
                     response = client.get(url, params=current_params)
             except httpx.TimeoutException as exc:
-                raise RequestTimeoutError(f"Request timed out for {url}") from exc
+                raise RequestTimeoutError(url) from exc
             except httpx.ConnectError as exc:
                 if retry_once:
                     retry_once = False
                     continue
-                raise NetworkError(f"Unable to connect to caniuse.com for {url}") from exc
+                raise NetworkError(url, cause=exc.__class__.__name__) from exc
             except httpx.RequestError as exc:
-                raise NetworkError(f"Network request failed for {url}") from exc
+                raise NetworkError(url, cause=exc.__class__.__name__) from exc
 
             if response.status_code != 200:
                 raise HttpStatusError(response.status_code, str(response.url))
 
             body = response.text
             if not body.strip():
-                raise ContentError(f"Received empty HTML content from {response.url}")
+                raise ContentError(str(response.url))
             return body
 
     try:

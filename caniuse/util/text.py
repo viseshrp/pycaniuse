@@ -28,7 +28,7 @@ def parse_percent(value: str | None) -> float | None:
 def wrap_lines(value: str, width: int) -> list[str]:
     """Wrap text to a specific width while preserving paragraph breaks."""
     width = max(width, 20)
-    paragraphs = [p for p in value.splitlines()]
+    paragraphs = list(value.splitlines())
     wrapped: list[str] = []
     for paragraph in paragraphs:
         if not paragraph.strip():

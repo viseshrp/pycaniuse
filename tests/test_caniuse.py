@@ -3,7 +3,6 @@ from __future__ import annotations
 from caniuse.parse_feature import parse_feature_basic, parse_feature_full
 from caniuse.parse_search import parse_search_results
 
-
 SEARCH_HTML = """
 <html>
   <body>
@@ -21,7 +20,9 @@ FEATURE_HTML = """
   <head><title>CSS Flexible Box Layout Module | Can I use</title></head>
   <body>
     <h1 class="feature-title">CSS Flexible Box Layout Module</h1>
-    <a href="https://www.w3.org/TR/css3-flexbox/" class="specification cr" title="W3C Candidate Recommendation">
+    <a href="https://www.w3.org/TR/css3-flexbox/"
+       class="specification cr"
+       title="W3C Candidate Recommendation">
       CSS Flexible Box Layout Module - CR
     </a>
     <li class="support-stats" data-usage-id="region.global">
@@ -29,7 +30,9 @@ FEATURE_HTML = """
       <span class="partial">0.4%</span>
       <span class="total">96.79%</span>
     </li>
-    <div class="feature-description"><p>Method of positioning items with <code>flex</code>.</p></div>
+    <div class="feature-description">
+      <p>Method of positioning items with <code>flex</code>.</p>
+    </div>
 
     <div class="support-container">
       <div class="support-list">

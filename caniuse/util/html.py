@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 from urllib.parse import urljoin
@@ -11,6 +12,7 @@ from justhtml import JustHTML
 from .text import normalize_whitespace
 
 Node = Any
+LOGGER = logging.getLogger(__name__)
 
 
 def parse_document(html: str) -> JustHTML:
@@ -77,7 +79,7 @@ def class_tokens(node: Node | None) -> tuple[str, ...]:
     """Return element classes as tokenized tuple."""
     class_attr = attr(node, "class")
     if not class_attr:
-        return tuple()
+        return ()
     return tuple(token for token in class_attr.split() if token)
 
 
@@ -96,4 +98,4 @@ def debug_enabled() -> bool:
 def debug_log(message: str) -> None:
     """Emit debug logs to stderr in debug mode only."""
     if debug_enabled():
-        print(f"[pycaniuse:debug] {message}", flush=True)
+        LOGGER.debug("%s", message)

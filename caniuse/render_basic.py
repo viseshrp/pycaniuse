@@ -12,7 +12,11 @@ from .util.text import extract_note_markers
 
 
 def _usage_line(feature: FeatureBasic) -> str | None:
-    if feature.usage_supported is None and feature.usage_partial is None and feature.usage_total is None:
+    if (
+        feature.usage_supported is None
+        and feature.usage_partial is None
+        and feature.usage_total is None
+    ):
         return None
 
     parts: list[str] = []
@@ -54,7 +58,9 @@ def render_basic(feature: FeatureBasic) -> Group:
             status_label = STATUS_LABEL_MAP.get(support_range.status, STATUS_LABEL_MAP["u"])
             notes = extract_note_markers(support_range.raw_classes)
             note_hint = f" [See notes: {','.join(notes)}]" if notes else ""
-            lines.append(Text(f"  {support_range.range_text}: {status_icon} {status_label}{note_hint}"))
+            lines.append(
+                Text(f"  {support_range.range_text}: {status_icon} {status_label}{note_hint}")
+            )
 
     lines.append(Text(""))
     lines.append(Text(FULL_MODE_HINT, style="dim"))

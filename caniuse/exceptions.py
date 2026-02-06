@@ -10,9 +10,18 @@ class CaniuseError(Exception):
 class NetworkError(CaniuseError):
     """Raised when a network operation fails."""
 
+    def __init__(self, url: str, *, cause: str | None = None) -> None:
+        detail = f"Unable to connect to caniuse.com for {url}"
+        if cause:
+            detail = f"{detail} ({cause})"
+        super().__init__(detail)
+
 
 class RequestTimeoutError(CaniuseError):
     """Raised when a request times out."""
+
+    def __init__(self, url: str) -> None:
+        super().__init__(f"Request timed out for {url}")
 
 
 class HttpStatusError(CaniuseError):
@@ -26,3 +35,6 @@ class HttpStatusError(CaniuseError):
 
 class ContentError(CaniuseError):
     """Raised when a response body is invalid or unexpectedly empty."""
+
+    def __init__(self, url: str) -> None:
+        super().__init__(f"Received empty HTML content from {url}")

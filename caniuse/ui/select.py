@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 import os
 import select
 import sys
 import termios
 import tty
-from collections.abc import Iterable, Iterator
-from contextlib import contextmanager
 
 from rich.console import Console, Group
 from rich.live import Live
@@ -37,11 +37,11 @@ def _read_key(timeout: float = 0.2) -> str | None:
     if os.name == "nt":  # pragma: no cover
         import msvcrt
 
-        if not msvcrt.kbhit():
+        if not msvcrt.kbhit():  # type: ignore[attr-defined]
             return None
-        first = msvcrt.getwch()
+        first: str = msvcrt.getwch()  # type: ignore[attr-defined]
         if first in {"\x00", "\xe0"}:
-            second = msvcrt.getwch()
+            second: str = msvcrt.getwch()  # type: ignore[attr-defined]
             return {"H": "up", "P": "down"}.get(second)
         if first in {"\r", "\n"}:
             return "enter"
@@ -69,11 +69,13 @@ def _read_key(timeout: float = 0.2) -> str | None:
     return None
 
 
-def _build_frame(matches: list[SearchMatch], selected_idx: int, width: int, start: int, stop: int) -> Panel:
+def _build_frame(
+    matches: list[SearchMatch], selected_idx: int, width: int, start: int, stop: int
+) -> Panel:
     rows: list[Text] = []
     for index in range(start, stop):
         item = matches[index]
-        prefix = "❯" if index == selected_idx else "•"
+        prefix = ">" if index == selected_idx else "*"
         slug_piece = f"/{item.slug}"
         text_width = max(width - len(slug_piece) - 8, 10)
         label = ellipsize(item.title, text_width)
@@ -101,7 +103,10 @@ def select_match(matches: Iterable[SearchMatch]) -> str | None:
     top = 0
     console = Console()
 
-    with _raw_mode(enabled=(os.name != "nt")), Live(console=console, refresh_per_second=20, transient=True) as live:
+    with (
+        _raw_mode(enabled=(os.name != "nt")),
+        Live(console=console, refresh_per_second=20, transient=True) as live,
+    ):
         while True:
             height = max(console.size.height - 6, 5)
             if selected < top:
