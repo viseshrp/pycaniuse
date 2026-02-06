@@ -1,5 +1,7 @@
-"""All the core functionality of the code base is defined here."""
+"""Backward-compatible module shim."""
 
-def do_stuff(something: str) -> str:
-    """Do stuff."""
-    return something
+from __future__ import annotations
+
+from .cli import main
+
+__all__ = ["main"]
