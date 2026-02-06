@@ -312,31 +312,31 @@ Responsibilities:
 │ Phase A: Search and Selection Flow                                           │
 └─────────────────────────────────────────────────────────────────────────────┘
 
-  User Input                                           
-      │                                                
-      │ <query>                                        
-      ▼                                                
-┌───────────┐                                          
-│  cli.py   │                                          
-│           │  1. Build search URL                     
+  User Input
+      │
+      │ <query>
+      ▼
+┌───────────┐
+│  cli.py   │
+│           │  1. Build search URL
 │           │     https://caniuse.com/?search=<query>&static=1
-└─────┬─────┘                                          
-      │                                                
-      ▼                                                
-┌───────────┐                                          
-│  http.py  │  2. HTTP GET request                     
-│           │                                          
-│           │  3. Handle network errors                
+└─────┬─────┘
+      │
+      ▼
+┌───────────┐
+│  http.py  │  2. HTTP GET request
+│           │
+│           │  3. Handle network errors
 │           │     → Exit non-zero with friendly message
-└─────┬─────┘                                          
-      │ HTML string                                    
-      ▼                                                
-┌────────────────┐                                     
-│ parse_search   │  4. Parse search results            
-│    .py         │     → list[SearchMatch]             
-└─────┬──────────┘                                     
-      │                                                
-      ▼                                                
+└─────┬─────┘
+      │ HTML string
+      ▼
+┌────────────────┐
+│ parse_search   │  4. Parse search results
+│    .py         │     → list[SearchMatch]
+└─────┬──────────┘
+      │
+      ▼
 ┌─────────────────────────────────────────────────────┐
 │              BRANCHING LOGIC                         │
 │                                                     │
@@ -363,10 +363,10 @@ Responsibilities:
 │  └─────────────────┘        or cancels (q/Esc)     │
 │                                                     │
 └─────────────────────────────────────────────────────┘
-      │                                                
-      │ selected slug                                  
-      ▼                                                
-   Phase B...                                          
+      │
+      │ selected slug
+      ▼
+   Phase B...
 ```
 
 ### 4.2 Phase B: Feature Fetch → Render
@@ -376,15 +376,15 @@ Responsibilities:
 │ Phase B: Feature Detail Flow                                                 │
 └─────────────────────────────────────────────────────────────────────────────┘
 
-  Selected slug                                        
-      │                                                
-      ▼                                                
-┌───────────┐                                          
-│  http.py  │  1. Fetch feature page                   
-│           │     https://caniuse.com/<slug>?static=1  
-└─────┬─────┘                                          
-      │ HTML string                                    
-      ▼                                                
+  Selected slug
+      │
+      ▼
+┌───────────┐
+│  http.py  │  1. Fetch feature page
+│           │     https://caniuse.com/<slug>?static=1
+└─────┬─────┘
+      │ HTML string
+      ▼
 ┌──────────────────────────────────────────────────────┐
 │               MODE BRANCHING                          │
 │                                                      │
@@ -622,17 +622,17 @@ class FullScreenState:
     # Tab navigation
     selected_tab_idx: int        # Current tab (0-indexed)
     tabs: list[str]              # Available tab names
-    
+
     # Content scrolling
     scroll_offset: int           # Tab content scroll position
     support_scroll_offset: int   # Support region scroll (if long)
-    
+
     # Focus control (optional)
     mode_focus: str              # "support" or "tab" (if both scroll)
-    
+
     # Pre-computed content
     tab_lines: dict[str, list[str]]  # Pre-wrapped lines per tab
-    
+
     # Feature data
     feature: FeatureFull         # Parsed feature data
 ```
