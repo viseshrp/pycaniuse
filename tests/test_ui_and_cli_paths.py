@@ -29,12 +29,18 @@ class _FakeLive:
 
 
 class _FakeConsole:
-    def __init__(self, width: int = 120, height: int = 40) -> None:
+    def __init__(self, width: int = 120, height: int = 40, inputs: list[str] | None = None) -> None:
         self.size = SimpleNamespace(width=width, height=height)
         self.printed: list[object] = []
+        self._inputs = list(inputs or [])
 
     def print(self, obj: object) -> None:
         self.printed.append(obj)
+
+    def input(self, _prompt: str = "") -> str:
+        if self._inputs:
+            return self._inputs.pop(0)
+        return "q"
 
 
 class _FakeInOut:
@@ -184,11 +190,7 @@ def test_select_match_non_tty_and_interactive(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(ui_select.sys, "stdout", _FakeInOut(is_tty=False))
     assert ui_select.select_match(matches) == "a"
 
-    key_iter = iter(["down", "enter"])
-    monkeypatch.setattr(ui_select, "_read_key", lambda: next(key_iter))
-    monkeypatch.setattr(ui_select, "_raw_mode", _noop_raw_mode)
-    monkeypatch.setattr(ui_select, "Live", _FakeLive)
-    monkeypatch.setattr(ui_select, "Console", lambda: _FakeConsole())
+    monkeypatch.setattr(ui_select, "Console", lambda: _FakeConsole(inputs=["2"]))
     monkeypatch.setattr(ui_select.sys, "stdin", _FakeInOut(is_tty=True))
     monkeypatch.setattr(ui_select.sys, "stdout", _FakeInOut(is_tty=True))
 
@@ -199,11 +201,7 @@ def test_select_match_cancel_and_single_item(monkeypatch: pytest.MonkeyPatch) ->
     assert ui_select.select_match([]) is None
     assert ui_select.select_match([SearchMatch(slug="a", title="A", href="/a")]) == "a"
 
-    key_iter = iter(["esc"])
-    monkeypatch.setattr(ui_select, "_read_key", lambda: next(key_iter))
-    monkeypatch.setattr(ui_select, "_raw_mode", _noop_raw_mode)
-    monkeypatch.setattr(ui_select, "Live", _FakeLive)
-    monkeypatch.setattr(ui_select, "Console", lambda: _FakeConsole())
+    monkeypatch.setattr(ui_select, "Console", lambda: _FakeConsole(inputs=["q"]))
     monkeypatch.setattr(ui_select.sys, "stdin", _FakeInOut(is_tty=True))
     monkeypatch.setattr(ui_select.sys, "stdout", _FakeInOut(is_tty=True))
 
@@ -348,6 +346,40 @@ def test_fullscreen_no_tabs_uses_info_fallback(monkeypatch: pytest.MonkeyPatch) 
     fs.run_fullscreen(feature)
 
 
+def test_fullscreen_non_tty_preserves_literal_brackets(monkeypatch: pytest.MonkeyPatch) -> None:
+    feature = _sample_feature_full()
+    feature = FeatureFull(
+        slug=feature.slug,
+        title=feature.title,
+        spec_url=feature.spec_url,
+        spec_status=feature.spec_status,
+        usage_supported=feature.usage_supported,
+        usage_partial=feature.usage_partial,
+        usage_total=feature.usage_total,
+        description_text=feature.description_text,
+        browser_blocks=feature.browser_blocks,
+        parse_warnings=feature.parse_warnings,
+        notes_text="[older version](https://example.com/old)",
+        resources=[],
+        subfeatures=[],
+        tabs={"Notes": "[older version](https://example.com/old)"},
+    )
+
+    fake_console = _FakeConsole()
+    monkeypatch.setattr(fs, "Console", lambda: fake_console)
+    monkeypatch.setattr(fs.sys, "stdin", _FakeInOut(is_tty=False))
+    monkeypatch.setattr(fs.sys, "stdout", _FakeInOut(is_tty=False))
+
+    fs.run_fullscreen(feature)
+
+    panel_payloads = []
+    for obj in fake_console.printed:
+        renderable = getattr(obj, "renderable", None)
+        if hasattr(renderable, "plain") and isinstance(renderable.plain, str):
+            panel_payloads.append(renderable.plain)
+    assert any("[older version](https://example.com/old)" in payload for payload in panel_payloads)
+
+
 def test_cli_full_mode_and_error_path(monkeypatch: pytest.MonkeyPatch) -> None:
     runner = CliRunner()
 
@@ -395,6 +427,8 @@ def test_cli_multiple_results_cancel_and_basic_warning(monkeypatch: pytest.Monke
     monkeypatch.setattr(cli, "select_match", lambda matches: None)
     result = runner.invoke(cli.main, ["f"])
     assert result.exit_code != 0
+    assert "Multiple matches found in non-interactive mode." in result.output
+    assert "Selection canceled." in result.output
 
     monkeypatch.setattr(cli, "select_match", lambda matches: "grid")
     monkeypatch.setattr(cli, "fetch_feature_page", lambda slug: "feature")

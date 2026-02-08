@@ -100,7 +100,7 @@ def _parse_support_blocks(doc: object, *, include_all: bool) -> list[BrowserSupp
                     status = cast(Literal["y", "n", "a", "u"], token)
                     break
 
-            range_text = text(stat_cell)
+            range_text = _parse_support_range_text(stat_cell)
             if not range_text:
                 continue
 
@@ -126,6 +126,26 @@ def _parse_support_blocks(doc: object, *, include_all: bool) -> list[BrowserSupp
     if include_all:
         return output
     return [block for block in output if block.browser_key in BASIC_MODE_BROWSERS]
+
+
+def _parse_support_range_text(stat_cell: object) -> str:
+    """Extract only the version range text from a support list cell."""
+    children = list(getattr(stat_cell, "children", []))
+    text_parts: list[str] = []
+    for child in children:
+        if getattr(child, "name", None) == "#text":
+            child_text = text(child)
+            if child_text:
+                text_parts.append(child_text)
+    if text_parts:
+        return " ".join(text_parts).strip()
+
+    raw = text(stat_cell)
+    if not raw:
+        return ""
+    if " : " in raw:
+        return raw.split(" : ", maxsplit=1)[0].split(maxsplit=1)[-1]
+    return raw
 
 
 def _parse_notes(doc: object) -> str | None:

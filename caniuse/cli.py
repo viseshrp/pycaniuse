@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 import click
 from rich.console import Console
 
@@ -30,7 +32,7 @@ def main(query: tuple[str, ...], full_mode: bool) -> None:
         matches = parse_search_results(search_html)
 
         if not matches:
-            console.print(f"No matches found for query: {query_text}", style="yellow")
+            console.print(f"No matches found for '{query_text}'. Try a broader query.", style="yellow")
             raise click.exceptions.Exit(1)
 
         exact_match = next((item for item in matches if item.slug == query_text.lower()), None)
@@ -40,8 +42,16 @@ def main(query: tuple[str, ...], full_mode: bool) -> None:
         elif len(matches) == 1:
             slug = matches[0].slug
         else:
+            if not sys.stdin.isatty() or not sys.stdout.isatty():
+                choice = matches[0]
+                console.print(
+                    f"Multiple matches found in non-interactive mode. "
+                    f"Using first match: /{choice.slug}",
+                    style="yellow",
+                )
             slug = select_match(matches)
             if slug is None:
+                console.print("Selection canceled.", style="yellow")
                 raise click.exceptions.Exit(1)
         if slug is None:  # pragma: no cover - defensive
             raise click.exceptions.Exit(1)

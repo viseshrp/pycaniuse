@@ -209,3 +209,26 @@ def test_parse_feature_section_edge_cases() -> None:
     assert full.resources == [("Okay", "https://caniuse.com/ok")]
     assert full.subfeatures == []
     assert list(full.tabs.keys()) == ["Resources"]
+
+
+def test_parse_feature_support_range_text_ignores_a11y_status_suffix() -> None:
+    html = """
+    <html><body>
+      <h1 class="feature-title">Flexbox</h1>
+      <div class="support-container">
+        <div class="support-list">
+          <h4 class="browser-heading browser--chrome">Chrome</h4>
+          <ol>
+            <li class="stat-cell a current">
+              <span class="forced-colors-only">◐</span>
+              4 - 20
+              <span class="a11y-only">: Partial support</span>
+            </li>
+          </ol>
+        </div>
+      </div>
+    </body></html>
+    """
+    basic = parse_feature_basic(html, slug="flexbox")
+    assert basic.browser_blocks
+    assert basic.browser_blocks[0].ranges[0].range_text == "4 - 20"

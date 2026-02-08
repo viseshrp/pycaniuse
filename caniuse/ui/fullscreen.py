@@ -8,16 +8,17 @@ import os
 import select
 import sys
 import termios
+import textwrap
 import tty
 
-from rich.console import Console, Group
+from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 
 from ..constants import STATUS_ICON_MAP, STATUS_LABEL_MAP
 from ..model import FeatureFull
-from ..util.text import wrap_lines
+from ..util.text import extract_note_markers
 
 
 @contextmanager
@@ -110,135 +111,92 @@ def _support_lines(feature: FeatureFull) -> list[str]:
         lines.append(block.browser_name)
         for support_range in block.ranges:
             icon = STATUS_ICON_MAP.get(support_range.status, STATUS_ICON_MAP["u"])
-            label = STATUS_LABEL_MAP.get(support_range.status, STATUS_LABEL_MAP["u"])
-            lines.append(f"  {support_range.range_text}: {icon} {label}")
+            markers = extract_note_markers(support_range.raw_classes)
+            marker_tail = f" [notes: {','.join(markers)}]" if markers else ""
+            lines.append(f"  {icon} {support_range.range_text}{marker_tail}")
         lines.append("")
     return lines or ["No browser support blocks found."]
 
 
+def _feature_lines(feature: FeatureFull) -> list[str]:
+    lines: list[str] = [feature.title]
+
+    if feature.spec_url:
+        suffix = f" [{feature.spec_status}]" if feature.spec_status else ""
+        lines.append(f"Spec: {feature.spec_url}{suffix}")
+
+    usage_parts: list[str] = []
+    if feature.usage_supported is not None:
+        usage_parts.append(f"✅ {feature.usage_supported:.2f}%")
+    if feature.usage_partial is not None:
+        usage_parts.append(f"◐ {feature.usage_partial:.2f}%")
+    if feature.usage_total is not None:
+        usage_parts.append(f"Total {feature.usage_total:.2f}%")
+    if usage_parts:
+        lines.append("Usage: " + "  ".join(usage_parts))
+
+    if feature.description_text:
+        lines.append("")
+        lines.append("Description")
+        lines.append(feature.description_text)
+
+    lines.append("")
+    lines.append("Browser Support")
+    lines.append("")
+    lines.extend(_support_lines(feature))
+
+    if feature.notes_text:
+        lines.append("Notes")
+        lines.append(feature.notes_text)
+        lines.append("")
+
+    if feature.resources:
+        lines.append("Resources")
+        for label, url in feature.resources:
+            lines.append(f"- {label}: {url}")
+        lines.append("")
+
+    if feature.subfeatures:
+        lines.append("Sub-features")
+        for label, url in feature.subfeatures:
+            lines.append(f"- {label}: {url}")
+        lines.append("")
+
+    lines.append("Legend")
+    lines.append(f"- {STATUS_ICON_MAP['y']} = {STATUS_LABEL_MAP['y']}")
+    lines.append(f"- {STATUS_ICON_MAP['n']} = {STATUS_LABEL_MAP['n']}")
+    lines.append(f"- {STATUS_ICON_MAP['a']} = {STATUS_LABEL_MAP['a']}")
+    lines.append(f"- {STATUS_ICON_MAP['u']} = {STATUS_LABEL_MAP['u']}")
+
+    return lines
+
+
+def _wrap_line(value: str, width: int) -> list[str]:
+    if not value:
+        return [""]
+    indent_len = len(value) - len(value.lstrip(" "))
+    indent = " " * indent_len
+    content = value[indent_len:]
+    target_width = max(width - indent_len, 20)
+    wrapped = textwrap.wrap(content, width=target_width) or [""]
+    return [f"{indent}{line}" for line in wrapped]
+
+
+def _render_lines(feature: FeatureFull, width: int) -> list[str]:
+    lines: list[str] = []
+    for source_line in _feature_lines(feature):
+        lines.extend(_wrap_line(source_line, width))
+    return lines
+
+
 def run_fullscreen(feature: FeatureFull) -> None:
-    """Run the full-screen keyboard-first Rich UI."""
-    tabs = list(feature.tabs.keys())
-    if not tabs:
-        tabs = ["Info"]
-        feature_tabs = {"Info": "No additional sections available."}
-    else:
-        feature_tabs = feature.tabs
-
-    selected_tab_idx = 0
-    if "Notes" in tabs:
-        selected_tab_idx = tabs.index("Notes")
-
-    scroll_offset = 0
-    support_scroll_offset = 0
-
+    """Render a full feature page; in TTY use a pager for stable navigation."""
     console = Console()
-
-    if not sys.stdin.isatty() or not sys.stdout.isatty():
-        # Fallback for non-interactive environments.
-        console.print(Panel(Text(feature.title, style="bold"), title=f"/{feature.slug}"))
-        for line in _support_lines(feature):
-            console.print(line)
-        for tab_name in tabs:
-            console.print(f"\n[{tab_name}]\n{feature_tabs.get(tab_name, '')}")
+    lines = _render_lines(feature, console.size.width - 6)
+    renderable = Panel(Text("\n".join(lines)), title=f"/{feature.slug}", border_style="blue")
+    interactive_tty = sys.stdin.isatty() and sys.stdout.isatty()
+    if interactive_tty and hasattr(console, "pager"):
+        with console.pager(styles=True):
+            console.print(renderable)
         return
-
-    with (
-        _raw_mode(enabled=(os.name != "nt")),
-        Live(console=console, screen=True, refresh_per_second=20) as live,
-    ):
-        while True:
-            width = console.size.width
-            height = console.size.height
-
-            if width < 60 or height < 20:
-                warning = Panel(
-                    Text("Terminal too small; resize", style="bold yellow"),
-                    title="pycaniuse",
-                    border_style="yellow",
-                )
-                live.update(warning)
-                key = _read_key()
-                if key in {"q", "esc"}:
-                    return
-                continue
-
-            current_tab = tabs[selected_tab_idx]
-            tab_content = feature_tabs.get(current_tab, "")
-            content_lines = wrap_lines(tab_content, width - 6)
-            support_lines = wrap_lines("\n".join(_support_lines(feature)), width - 6)
-
-            max_support = max(len(support_lines) - 8, 0)
-            support_scroll_offset = max(0, min(support_scroll_offset, max_support))
-
-            content_window = max(height - 20, 3)
-            max_scroll = max(len(content_lines) - content_window, 0)
-            scroll_offset = max(0, min(scroll_offset, max_scroll))
-
-            header_lines = [Text(feature.title, style="bold")]
-            if feature.spec_url:
-                suffix = f" [{feature.spec_status}]" if feature.spec_status else ""
-                header_lines.append(Text(f"Spec: {feature.spec_url}{suffix}"))
-            usage_parts: list[str] = []
-            if feature.usage_supported is not None:
-                usage_parts.append(f"✅ {feature.usage_supported:.2f}%")
-            if feature.usage_partial is not None:
-                usage_parts.append(f"◐ {feature.usage_partial:.2f}%")
-            if feature.usage_total is not None:
-                usage_parts.append(f"Total {feature.usage_total:.2f}%")
-            if usage_parts:
-                header_lines.append(Text("Usage: " + "  ".join(usage_parts)))
-
-            tab_row = []
-            for idx, tab_name in enumerate(tabs, start=1):
-                style = "reverse bold" if idx - 1 == selected_tab_idx else "dim"
-                tab_row.append(Text(f" {idx}:{tab_name} ", style=style))
-            tabs_text = Text.assemble(*tab_row)
-
-            group = Group(
-                Panel(Group(*header_lines), border_style="blue", title=f"/{feature.slug}"),
-                Panel(
-                    Text(
-                        "\n".join(support_lines[support_scroll_offset : support_scroll_offset + 8])
-                    ),
-                    title="Support",
-                    border_style="cyan",
-                ),
-                Panel(tabs_text, border_style="magenta", title="Tabs"),
-                Panel(
-                    Text("\n".join(content_lines[scroll_offset : scroll_offset + content_window])),
-                    title=current_tab,
-                    border_style="green",
-                ),
-                Text("←/→ tabs  1-9 jump  ↑/↓ scroll  PgUp/PgDn/Home/End  q/Esc quit", style="dim"),
-            )
-            live.update(group)
-
-            key = _read_key()
-            if key is None:
-                continue
-            if key in {"q", "esc"}:
-                return
-            if key == "left":
-                selected_tab_idx = max(0, selected_tab_idx - 1)
-                scroll_offset = 0
-            elif key == "right":
-                selected_tab_idx = min(len(tabs) - 1, selected_tab_idx + 1)
-                scroll_offset = 0
-            elif key and key.isdigit() and key != "0":
-                idx = int(key) - 1
-                if idx < len(tabs):
-                    selected_tab_idx = idx
-                    scroll_offset = 0
-            elif key == "up":
-                scroll_offset = max(0, scroll_offset - 1)
-            elif key == "down":
-                scroll_offset = min(max_scroll, scroll_offset + 1)
-            elif key == "pgup":
-                scroll_offset = max(0, scroll_offset - max(3, content_window // 2))
-            elif key == "pgdn":
-                scroll_offset = min(max_scroll, scroll_offset + max(3, content_window // 2))
-            elif key == "home":
-                scroll_offset = 0
-            elif key == "end":
-                scroll_offset = max_scroll
+    console.print(renderable)
