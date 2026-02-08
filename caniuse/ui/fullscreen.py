@@ -22,8 +22,6 @@ from ..model import BrowserSupportBlock, FeatureFull, SupportRange
 from ..util.text import extract_note_markers
 
 _CARD_WIDTH = 24
-_HEADER_NAV = "Home   News   Compare browsers   About"
-_NEWS_TEXT = "January 2026 - New feature announcements available on caniuse.com"
 _KEY = Literal[
     "up",
     "down",
@@ -361,24 +359,6 @@ def _tab_panel(feature: FeatureFull, state: _TuiState, max_rows: int) -> Panel:
     )
 
 
-def _header_panel(feature: FeatureFull) -> Panel:
-    query_line = Text("Can I use ", style="bold")
-    query_line.append(feature.title, style="bold white")
-    query_line.append(" ?", style="bold")
-    query_line.append("   Settings", style="cyan")
-
-    return Panel(
-        Group(
-            Text(_HEADER_NAV, style="grey82"),
-            Text(_NEWS_TEXT, style="yellow"),
-            Text(""),
-            query_line,
-        ),
-        title="caniuse.com",
-        border_style="blue",
-    )
-
-
 def _feature_heading_panel(feature: FeatureFull, width: int) -> Panel:
     title_line = Text(feature.title, style="bold")
     if feature.spec_status:
@@ -438,17 +418,15 @@ def _footer_panel() -> Panel:
 def _build_layout(feature: FeatureFull, state: _TuiState, console: Console) -> Layout:
     size = console.size
     root = Layout()
-    header_size = 6
     footer_size = 4
-    feature_size = 9 if size.height >= 32 else 7
+    feature_size = 10 if size.height >= 32 else 8
     support_size = min(max(size.height // 3, 9), 16)
-    details_size = max(size.height - header_size - footer_size - feature_size - support_size, 8)
+    details_size = max(size.height - footer_size - feature_size - support_size, 8)
 
     support_rows = max(support_size - 3, 5)
     details_rows = max(details_size - 2, 6)
 
     root.split_column(
-        Layout(name="header", size=header_size),
         Layout(name="feature", size=feature_size),
         Layout(name="support", size=support_size),
         Layout(name="details", size=details_size),
@@ -459,7 +437,6 @@ def _build_layout(feature: FeatureFull, state: _TuiState, console: Console) -> L
         Layout(name="tabs"),
     )
 
-    root["header"].update(_header_panel(feature))
     root["feature"].update(_feature_heading_panel(feature, size.width))
     root["support"].update(
         _support_overview_panel(feature, state, size.width - 6, support_rows)

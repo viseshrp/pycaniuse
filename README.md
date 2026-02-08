@@ -85,6 +85,7 @@ Status icons:
 Shows an expanded interactive TUI, including:
 
 - A caniuse-style header and feature metadata panel.
+- A feature metadata panel with usage summary.
 - All browser support blocks in a horizontal support table.
 - A selected-browser detail view with range-by-range status rows.
 - Tabbed feature sections for:
