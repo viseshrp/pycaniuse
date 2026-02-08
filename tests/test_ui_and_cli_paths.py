@@ -1,31 +1,34 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
 from types import SimpleNamespace
 
+from click.testing import CliRunner
 import pytest
+from rich.text import Text
 
 from caniuse import cli
 from caniuse.exceptions import CaniuseError
-from click.testing import CliRunner
-
 from caniuse.model import BrowserSupportBlock, FeatureBasic, FeatureFull, SearchMatch, SupportRange
 from caniuse.ui import fullscreen as fs
 from caniuse.ui import select as ui_select
 
 
-class _FakeLive:
-    def __init__(self, **_: object) -> None:
-        self.updated: list[object] = []
+class _FakePager:
+    def __init__(self, calls: list[str]) -> None:
+        self._calls = calls
 
-    def __enter__(self) -> _FakeLive:
+    def __enter__(self) -> _FakePager:
+        self._calls.append("enter")
         return self
 
-    def __exit__(self, _exc_type, _exc, _tb) -> None:  # type: ignore[no-untyped-def]
+    def __exit__(
+        self,
+        _exc_type: type[BaseException] | None,
+        _exc: BaseException | None,
+        _tb: object | None,
+    ) -> None:
+        self._calls.append("exit")
         return None
-
-    def update(self, item: object) -> None:
-        self.updated.append(item)
 
 
 class _FakeConsole:
@@ -33,8 +36,29 @@ class _FakeConsole:
         self.size = SimpleNamespace(width=width, height=height)
         self.printed: list[object] = []
         self._inputs = list(inputs or [])
+        self.pager_calls: list[str] = []
+        self.pager_styles: list[bool] = []
 
-    def print(self, obj: object) -> None:
+    def print(self, obj: object, **_kwargs: object) -> None:
+        self.printed.append(obj)
+
+    def input(self, _prompt: str = "") -> str:
+        if self._inputs:
+            return self._inputs.pop(0)
+        return "q"
+
+    def pager(self, *, styles: bool = False) -> _FakePager:
+        self.pager_styles.append(styles)
+        return _FakePager(self.pager_calls)
+
+
+class _FakeConsoleNoPager:
+    def __init__(self, width: int = 120, height: int = 40, inputs: list[str] | None = None) -> None:
+        self.size = SimpleNamespace(width=width, height=height)
+        self.printed: list[object] = []
+        self._inputs = list(inputs or [])
+
+    def print(self, obj: object, **_kwargs: object) -> None:
         self.printed.append(obj)
 
     def input(self, _prompt: str = "") -> str:
@@ -69,10 +93,7 @@ class _FakeStdinRead:
         return 0
 
 
-@contextmanager
-def _noop_raw_mode(enabled: bool):
-    _ = enabled
-    yield
+_SelectResult = tuple[list[_FakeStdinRead], list[object], list[object]]
 
 
 def _sample_feature_full() -> FeatureFull:
@@ -139,6 +160,13 @@ def test_raw_mode_enabled_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "inside-fullscreen" in calls
 
 
+def test_raw_mode_disabled_paths() -> None:
+    with ui_select._raw_mode(enabled=False):
+        pass
+    with fs._raw_mode(enabled=False):
+        pass
+
+
 def test_select_read_key_variants(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ui_select.select, "select", lambda *_args, **_kwargs: ([], [], []))
     assert ui_select._read_key() is None
@@ -158,7 +186,7 @@ def test_select_read_key_variants(monkeypatch: pytest.MonkeyPatch) -> None:
 
     calls = {"count": 0}
 
-    def _sel(*_args, **_kwargs):
+    def _sel(*_args: object, **_kwargs: object) -> _SelectResult:
         calls["count"] += 1
         return ([stdin], [], [])
 
@@ -216,6 +244,34 @@ def test_select_match_cancel_and_single_item(monkeypatch: pytest.MonkeyPatch) ->
     )
 
 
+def test_select_match_invalid_then_valid(monkeypatch: pytest.MonkeyPatch) -> None:
+    matches = [
+        SearchMatch(slug="a", title="A", href="/a"),
+        SearchMatch(slug="b", title="B", href="/b"),
+    ]
+    fake_console = _FakeConsole(inputs=["bad", "3", "2"])
+    monkeypatch.setattr(ui_select, "Console", lambda: fake_console)
+    monkeypatch.setattr(ui_select.sys, "stdin", _FakeInOut(is_tty=True))
+    monkeypatch.setattr(ui_select.sys, "stdout", _FakeInOut(is_tty=True))
+
+    assert ui_select.select_match(matches) == "b"
+    assert "Invalid selection. Try again." in fake_console.printed
+
+
+def test_select_build_frame() -> None:
+    panel = ui_select._build_frame(
+        [
+            SearchMatch(slug="a", title="A very long title that should ellipsize", href="/a"),
+            SearchMatch(slug="b", title="B", href="/b"),
+        ],
+        selected_idx=1,
+        width=20,
+        start=0,
+        stop=2,
+    )
+    assert panel.title == "Select a feature"
+
+
 def test_fullscreen_read_key_branches(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(fs.select, "select", lambda *_args, **_kwargs: ([], [], []))
     assert fs._read_key() is None
@@ -228,7 +284,7 @@ def test_fullscreen_read_key_branches(monkeypatch: pytest.MonkeyPatch) -> None:
     stdin = _FakeStdinRead("\x1b[C")
     monkeypatch.setattr(fs.sys, "stdin", stdin)
 
-    def _sel(*_args, **_kwargs):
+    def _sel(*_args: object, **_kwargs: object) -> _SelectResult:
         return ([stdin], [], [])
 
     monkeypatch.setattr(fs.select, "select", _sel)
@@ -264,6 +320,35 @@ def test_fullscreen_read_key_branches(monkeypatch: pytest.MonkeyPatch) -> None:
     assert fs._read_key() == "esc"
 
 
+def test_fullscreen_read_key_escape_variants(monkeypatch: pytest.MonkeyPatch) -> None:
+    stdin = _FakeStdinRead("\x1bX")
+    monkeypatch.setattr(fs.sys, "stdin", stdin)
+    monkeypatch.setattr(
+        fs.select,
+        "select",
+        lambda *_args, **_kwargs: ([stdin], [], []) if stdin._chars else ([], [], []),
+    )
+    assert fs._read_key() == "esc"
+
+    stdin = _FakeStdinRead("\x1b[")
+    monkeypatch.setattr(fs.sys, "stdin", stdin)
+    monkeypatch.setattr(
+        fs.select,
+        "select",
+        lambda *_args, **_kwargs: ([stdin], [], []) if stdin._chars else ([], [], []),
+    )
+    assert fs._read_key() == "esc"
+
+    stdin = _FakeStdinRead("\x1b[9")
+    monkeypatch.setattr(fs.sys, "stdin", stdin)
+    monkeypatch.setattr(
+        fs.select,
+        "select",
+        lambda *_args, **_kwargs: ([stdin], [], []) if stdin._chars else ([], [], []),
+    )
+    assert fs._read_key() is None
+
+
 def test_fullscreen_support_lines_and_non_tty(monkeypatch: pytest.MonkeyPatch) -> None:
     feature = _sample_feature_full()
     assert fs._support_lines(feature)
@@ -277,44 +362,28 @@ def test_fullscreen_support_lines_and_non_tty(monkeypatch: pytest.MonkeyPatch) -
     assert fake_console.printed
 
 
-def test_fullscreen_small_terminal_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fullscreen_tty_uses_pager(monkeypatch: pytest.MonkeyPatch) -> None:
     feature = _sample_feature_full()
-    monkeypatch.setattr(fs, "Console", lambda: _FakeConsole(width=40, height=10))
-    monkeypatch.setattr(fs, "Live", _FakeLive)
-    monkeypatch.setattr(fs, "_raw_mode", _noop_raw_mode)
-    monkeypatch.setattr(fs, "_read_key", lambda: "q")
+    fake_console = _FakeConsole(width=40, height=10)
+    monkeypatch.setattr(fs, "Console", lambda: fake_console)
     monkeypatch.setattr(fs.sys, "stdin", _FakeInOut(is_tty=True))
     monkeypatch.setattr(fs.sys, "stdout", _FakeInOut(is_tty=True))
 
     fs.run_fullscreen(feature)
+    assert fake_console.pager_calls == ["enter", "exit"]
+    assert fake_console.pager_styles == [True]
+    assert fake_console.printed
 
 
-def test_fullscreen_interactive_key_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fullscreen_tty_without_pager_falls_back_to_print(monkeypatch: pytest.MonkeyPatch) -> None:
     feature = _sample_feature_full()
-    key_iter = iter(["right", "1", "down", "pgdn", "home", "end", "left", "q"])
-
-    monkeypatch.setattr(fs, "Console", lambda: _FakeConsole(width=120, height=40))
-    monkeypatch.setattr(fs, "Live", _FakeLive)
-    monkeypatch.setattr(fs, "_raw_mode", _noop_raw_mode)
-    monkeypatch.setattr(fs, "_read_key", lambda: next(key_iter))
+    fake_console = _FakeConsoleNoPager(width=120, height=40)
+    monkeypatch.setattr(fs, "Console", lambda: fake_console)
     monkeypatch.setattr(fs.sys, "stdin", _FakeInOut(is_tty=True))
     monkeypatch.setattr(fs.sys, "stdout", _FakeInOut(is_tty=True))
 
     fs.run_fullscreen(feature)
-
-
-def test_fullscreen_interactive_continues_on_none_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    feature = _sample_feature_full()
-    key_iter = iter([None, "q"])
-
-    monkeypatch.setattr(fs, "Console", lambda: _FakeConsole(width=120, height=40))
-    monkeypatch.setattr(fs, "Live", _FakeLive)
-    monkeypatch.setattr(fs, "_raw_mode", _noop_raw_mode)
-    monkeypatch.setattr(fs, "_read_key", lambda: next(key_iter))
-    monkeypatch.setattr(fs.sys, "stdin", _FakeInOut(is_tty=True))
-    monkeypatch.setattr(fs.sys, "stdout", _FakeInOut(is_tty=True))
-
-    fs.run_fullscreen(feature)
+    assert fake_console.printed
 
 
 def test_fullscreen_no_tabs_uses_info_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -337,9 +406,6 @@ def test_fullscreen_no_tabs_uses_info_fallback(monkeypatch: pytest.MonkeyPatch) 
     )
 
     monkeypatch.setattr(fs, "Console", lambda: _FakeConsole(width=120, height=40))
-    monkeypatch.setattr(fs, "Live", _FakeLive)
-    monkeypatch.setattr(fs, "_raw_mode", _noop_raw_mode)
-    monkeypatch.setattr(fs, "_read_key", lambda: "q")
     monkeypatch.setattr(fs.sys, "stdin", _FakeInOut(is_tty=True))
     monkeypatch.setattr(fs.sys, "stdout", _FakeInOut(is_tty=True))
 
@@ -375,7 +441,7 @@ def test_fullscreen_non_tty_preserves_literal_brackets(monkeypatch: pytest.Monke
     panel_payloads = []
     for obj in fake_console.printed:
         renderable = getattr(obj, "renderable", None)
-        if hasattr(renderable, "plain") and isinstance(renderable.plain, str):
+        if isinstance(renderable, Text):
             panel_payloads.append(renderable.plain)
     assert any("[older version](https://example.com/old)" in payload for payload in panel_payloads)
 
@@ -403,10 +469,14 @@ def test_cli_full_mode_and_error_path(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.exit_code == 0
     assert called["full"] is True
 
-    class _Boom(CaniuseError):
+    class _BoomError(CaniuseError):
         pass
 
-    monkeypatch.setattr(cli, "fetch_search_page", lambda query: (_ for _ in ()).throw(_Boom("x")))
+    monkeypatch.setattr(
+        cli,
+        "fetch_search_page",
+        lambda query: (_ for _ in ()).throw(_BoomError("x")),
+    )
     result = runner.invoke(cli.main, ["flexbox"])
     assert result.exit_code != 0
     assert "Error" in result.output

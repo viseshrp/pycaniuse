@@ -9,14 +9,20 @@ import select
 import sys
 import termios
 import tty
+from typing import Protocol, cast
 
 from rich.console import Console, Group
-from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 
 from ..model import SearchMatch
 from ..util.text import ellipsize
+
+
+class _MsvcrtModule(Protocol):
+    def kbhit(self) -> bool: ...
+
+    def getwch(self) -> str: ...
 
 
 @contextmanager
@@ -35,13 +41,15 @@ def _raw_mode(enabled: bool) -> Iterator[None]:
 
 def _read_key(timeout: float = 0.2) -> str | None:
     if os.name == "nt":  # pragma: no cover
-        import msvcrt
+        import msvcrt as _msvcrt
 
-        if not msvcrt.kbhit():  # type: ignore[attr-defined]
+        msvcrt = cast(_MsvcrtModule, _msvcrt)
+
+        if not msvcrt.kbhit():
             return None
-        first: str = msvcrt.getwch()  # type: ignore[attr-defined]
+        first: str = msvcrt.getwch()
         if first in {"\x00", "\xe0"}:
-            second: str = msvcrt.getwch()  # type: ignore[attr-defined]
+            second: str = msvcrt.getwch()
             return {"H": "up", "P": "down"}.get(second)
         if first in {"\r", "\n"}:
             return "enter"

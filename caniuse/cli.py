@@ -32,7 +32,9 @@ def main(query: tuple[str, ...], full_mode: bool) -> None:
         matches = parse_search_results(search_html)
 
         if not matches:
-            console.print(f"No matches found for '{query_text}'. Try a broader query.", style="yellow")
+            console.print(
+                f"No matches found for '{query_text}'. Try a broader query.", style="yellow"
+            )
             raise click.exceptions.Exit(1)
 
         exact_match = next((item for item in matches if item.slug == query_text.lower()), None)

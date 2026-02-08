@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import ClassVar
+
 import httpx
 import pytest
 
@@ -10,8 +12,8 @@ from caniuse.exceptions import ContentError, HttpStatusError, NetworkError, Requ
 
 
 class _FakeClient:
-    plans: list[object] = []
-    seen_params: list[dict[str, str] | None] = []
+    plans: ClassVar[list[object]] = []
+    seen_params: ClassVar[list[dict[str, str] | None]] = []
 
     def __init__(self, **_: object) -> None:
         pass
@@ -19,7 +21,12 @@ class _FakeClient:
     def __enter__(self) -> _FakeClient:
         return self
 
-    def __exit__(self, _exc_type, _exc, _tb) -> None:  # type: ignore[no-untyped-def]
+    def __exit__(
+        self,
+        _exc_type: type[BaseException] | None,
+        _exc: BaseException | None,
+        _tb: object | None,
+    ) -> None:
         return None
 
     def get(self, url: str, params: dict[str, str] | None = None) -> httpx.Response:
@@ -34,7 +41,7 @@ class _FakeClient:
                 text=text,
                 request=httpx.Request("GET", url, params=params),
             )
-        raise AssertionError("Unexpected plan")
+        raise AssertionError
 
 
 def _reset_plans(*plans: object) -> None:

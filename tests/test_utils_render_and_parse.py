@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from typing import ClassVar
+
+import pytest
 from rich.console import Console
 
 from caniuse.model import BrowserSupportBlock, FeatureBasic, SupportRange
-from caniuse.parse_feature import parse_feature_basic, parse_feature_full
+from caniuse.parse_feature import _parse_support_range_text, parse_feature_basic, parse_feature_full
 from caniuse.parse_search import _slug_from_href, parse_search_results
 from caniuse.render_basic import _usage_line, render_basic
 from caniuse.util import html as html_utils
@@ -22,13 +25,13 @@ def test_text_utils_branches() -> None:
     assert text_utils.extract_note_markers(("#1", "x", "#4")) == ["1", "4"]
 
 
-def test_html_utils_with_document_and_invalid_node(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_html_utils_with_document_and_invalid_node(monkeypatch: pytest.MonkeyPatch) -> None:
     doc = html_utils.parse_document("<html><body><div class='x'>hi</div></body></html>")
     assert html_utils.first(doc, ".x") is not None
     assert len(html_utils.all_nodes(doc, "div")) == 1
 
     class _BadQuery:
-        def query(self, selector: str):
+        def query(self, selector: str) -> list[object]:
             _ = selector
             raise RuntimeError("bad")
 
@@ -45,7 +48,7 @@ def test_html_utils_with_document_and_invalid_node(monkeypatch) -> None:  # type
     assert html_utils.text(_DataNode()) == "hello world"
 
     class _AttrNode:
-        attrs = {"href": "/x", "class": "a b"}
+        attrs: ClassVar[dict[str, str]] = {"href": "/x", "class": "a b"}
 
     assert html_utils.attr(_AttrNode(), "href") == "/x"
     assert html_utils.class_tokens(_AttrNode()) == ("a", "b")
@@ -73,6 +76,25 @@ def test_html_utils_text_markdown_fallbacks() -> None:
     assert html_utils.text(_Raises()) == ""
     assert html_utils.markdown_text(_RaisesMd()) == "text"
     assert html_utils.attr(_NoAttrs(), "x") is None
+
+
+def test_html_utils_additional_branches(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _NoQuery:
+        pass
+
+    class _EmptyNode:
+        pass
+
+    class _NoMarkdown:
+        def to_text(self) -> str:
+            return " plain "
+
+    assert html_utils.all_nodes(_NoQuery(), ".x") == []
+    assert html_utils.text(_EmptyNode()) == ""
+    assert html_utils.markdown_text(_NoMarkdown()) == "plain"
+
+    monkeypatch.setenv("PYCANIUSE_DEBUG", "0")
+    html_utils.debug_log("not logged")
 
 
 def test_parse_search_slug_and_primary_strategy() -> None:
@@ -232,3 +254,43 @@ def test_parse_feature_support_range_text_ignores_a11y_status_suffix() -> None:
     basic = parse_feature_basic(html, slug="flexbox")
     assert basic.browser_blocks
     assert basic.browser_blocks[0].ranges[0].range_text == "4 - 20"
+
+
+def test_parse_feature_slug_title_fallback_and_invalid_browser_heading() -> None:
+    html = """
+    <html><body>
+      <div class="support-container">
+        <div class="support-list">
+          <h4 class="browser-heading"></h4>
+          <ol><li class="stat-cell y current">1</li></ol>
+        </div>
+      </div>
+    </body></html>
+    """
+    full = parse_feature_full(html, slug="fallback-slug")
+    assert full.title == "fallback-slug"
+    assert full.browser_blocks == []
+    assert full.parse_warnings == ["support"]
+
+
+def test_parse_support_range_text_colon_fallback_and_subfeature_filtering() -> None:
+    class _NodeWithToText:
+        def to_text(self) -> str:
+            return "prefix 9 : Partial support"
+
+    assert _parse_support_range_text(_NodeWithToText()) == "9"
+
+    html = """
+    <html><body>
+      <h1 class="feature-title">Feature</h1>
+      <dl>
+        <dt>Sub-features:</dt>
+        <dd>
+          <a href="">Bad</a>
+          <a href="/good">Good</a>
+        </dd>
+      </dl>
+    </body></html>
+    """
+    full = parse_feature_full(html, slug="feature")
+    assert full.subfeatures == [("Good", "https://caniuse.com/good")]

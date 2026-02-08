@@ -10,15 +10,21 @@ import sys
 import termios
 import textwrap
 import tty
+from typing import Protocol, cast
 
 from rich.console import Console
-from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 
 from ..constants import STATUS_ICON_MAP, STATUS_LABEL_MAP
 from ..model import FeatureFull
 from ..util.text import extract_note_markers
+
+
+class _MsvcrtModule(Protocol):
+    def kbhit(self) -> bool: ...
+
+    def getwch(self) -> str: ...
 
 
 @contextmanager
@@ -37,13 +43,15 @@ def _raw_mode(enabled: bool) -> Iterator[None]:
 
 def _read_key(timeout: float = 0.2) -> str | None:
     if os.name == "nt":  # pragma: no cover
-        import msvcrt
+        import msvcrt as _msvcrt
 
-        if not msvcrt.kbhit():  # type: ignore[attr-defined]
+        msvcrt = cast(_MsvcrtModule, _msvcrt)
+
+        if not msvcrt.kbhit():
             return None
-        key: str = msvcrt.getwch()  # type: ignore[attr-defined]
+        key: str = msvcrt.getwch()
         if key in {"\x00", "\xe0"}:
-            second: str = msvcrt.getwch()  # type: ignore[attr-defined]
+            second: str = msvcrt.getwch()
             return {
                 "H": "up",
                 "P": "down",

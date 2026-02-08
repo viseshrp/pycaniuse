@@ -120,6 +120,7 @@ markers = [
     "integration:Run integration tests",
     "smoke:Run the smoke tests",
     "unit:Run the unit tests",
+    "canary:Live caniuse.com HTML structure check (networked)",
 ]
 norecursedirs = [
     ".git",
@@ -241,7 +242,7 @@ sort_by_size = true
 exclude = ["venv/", ".venv/"]
 
 [tool.deptry]
-exclude = ["venv/.*", ".venv/.*", "tests/.*"]
+exclude = ["venv/.*", ".venv/.*", ".tox/.*", "tests/.*"]
 
 [tool.pre-commit.default_language_versions]
 python = "3.13"
