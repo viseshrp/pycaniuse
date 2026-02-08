@@ -7,6 +7,7 @@ from click.testing import CliRunner
 from pytest import MonkeyPatch
 
 from caniuse import __version__, cli
+from caniuse.exceptions import CaniuseError
 from caniuse.model import BrowserSupportBlock, FeatureBasic, FeatureFull, SearchMatch, SupportRange
 
 
@@ -294,3 +295,32 @@ def test_cli_wraps_fetches_in_shared_client_context(monkeypatch: MonkeyPatch) ->
     assert state["exited"] == 1
     assert state["search_in_context"] is True
     assert state["feature_in_context"] is True
+
+
+def test_cli_error_path_still_exits_shared_client_context(monkeypatch: MonkeyPatch) -> None:
+    runner = CliRunner()
+    state = {"entered": 0, "exited": 0}
+
+    @contextmanager
+    def _fake_shared_client() -> Iterator[object]:
+        state["entered"] += 1
+        try:
+            yield object()
+        finally:
+            state["exited"] += 1
+
+    class _BoomError(CaniuseError):
+        pass
+
+    monkeypatch.setattr(cli, "use_shared_client", _fake_shared_client)
+    monkeypatch.setattr(
+        cli,
+        "fetch_search_page",
+        lambda _query: (_ for _ in ()).throw(_BoomError("boom")),
+    )
+
+    result = runner.invoke(cli.main, ["flexbox"])
+    assert result.exit_code != 0
+    assert "Error: boom" in result.output
+    assert state["entered"] == 1
+    assert state["exited"] == 1

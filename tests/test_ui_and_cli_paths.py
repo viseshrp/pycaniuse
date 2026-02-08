@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import sys
 from types import SimpleNamespace
 from typing import Literal
 
@@ -378,6 +379,60 @@ def test_fullscreen_layout_has_expected_sections_without_removed_header() -> Non
 def test_fullscreen_extract_global_usage_parses_only_expected_pattern() -> None:
     assert fs._extract_global_usage("Global usage: 1.58% - Supported") == "1.58%"
     assert fs._extract_global_usage("usage missing label") is None
+
+
+def test_fullscreen_read_key_windows_without_getwch_returns_noop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "msvcrt", SimpleNamespace())
+    assert fs._read_key_windows() == "noop"
+
+
+def test_fullscreen_read_key_windows_maps_regular_and_special_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _module_for_keys(keys: list[str]) -> SimpleNamespace:
+        it = iter(keys)
+        return SimpleNamespace(getwch=lambda: next(it))
+
+    monkeypatch.setitem(sys.modules, "msvcrt", _module_for_keys(["]"]))
+    assert fs._read_key_windows() == "next_tab"
+
+    monkeypatch.setitem(sys.modules, "msvcrt", _module_for_keys(["\x00", "H"]))
+    assert fs._read_key_windows() == "up"
+
+    monkeypatch.setitem(sys.modules, "msvcrt", _module_for_keys(["\x00", "?"]))
+    assert fs._read_key_windows() == "noop"
+
+
+def test_raw_input_posix_restores_terminal_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    import termios
+    import tty
+
+    calls: dict[str, object] = {}
+    attrs: list[int | list[int | bytes]] = [1, [2], 3, [b"x"], 5, 6, 7]
+
+    monkeypatch.setattr(fs.os, "name", "posix")
+    monkeypatch.setattr(fs.sys, "stdin", _FakeInOut(is_tty=True))
+    monkeypatch.setattr(termios, "tcgetattr", lambda _fd: attrs)
+    monkeypatch.setattr(tty, "setcbreak", lambda fd: calls.setdefault("setcbreak", fd))
+
+    def _tcsetattr(fd: int, when: int, value: object) -> None:
+        calls["tcsetattr"] = (fd, when, value)
+
+    monkeypatch.setattr(termios, "tcsetattr", _tcsetattr)
+
+    raw = fs._RawInput()
+    with raw:
+        pass
+
+    assert calls["setcbreak"] == 0
+    record = calls["tcsetattr"]
+    assert isinstance(record, tuple)
+    fd, when, value = record
+    assert fd == 0
+    assert when == termios.TCSADRAIN
+    assert value == attrs
 
 
 def test_cli_full_mode_and_error_path(monkeypatch: pytest.MonkeyPatch) -> None:
