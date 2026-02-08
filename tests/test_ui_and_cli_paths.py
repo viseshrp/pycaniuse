@@ -190,17 +190,22 @@ def test_fullscreen_support_lines_and_non_tty(monkeypatch: pytest.MonkeyPatch) -
     assert fake_console.printed
 
 
-def test_fullscreen_tty_uses_pager(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fullscreen_tty_uses_tui(monkeypatch: pytest.MonkeyPatch) -> None:
     feature = _sample_feature_full()
     fake_console = _FakeConsole(width=40, height=10)
+    called = {"tui": False}
+
+    def _run_tui(console: object, arg_feature: FeatureFull) -> None:
+        called["tui"] = True
+        assert console is fake_console
+        assert arg_feature is feature
+
     monkeypatch.setattr(fs, "Console", lambda: fake_console)
-    monkeypatch.setattr(fs.sys, "stdin", _FakeInOut(is_tty=True))
-    monkeypatch.setattr(fs.sys, "stdout", _FakeInOut(is_tty=True))
+    monkeypatch.setattr(fs, "_supports_tui", lambda _console: True)
+    monkeypatch.setattr(fs, "_run_tui", _run_tui)
 
     fs.run_fullscreen(feature)
-    assert fake_console.pager_calls == ["enter", "exit"]
-    assert fake_console.pager_styles == [True]
-    assert fake_console.printed
+    assert called["tui"] is True
 
 
 def test_fullscreen_tty_without_pager_falls_back_to_print(monkeypatch: pytest.MonkeyPatch) -> None:

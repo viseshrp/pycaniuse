@@ -82,13 +82,29 @@ Status icons:
 
 ### Full Mode (`--full`)
 
-Shows an expanded output, including:
+Shows an expanded interactive TUI, including:
 
-- All browser support blocks found on the page.
-- Notes/resources/sub-features when present.
-- A full legend and wrapped text rendering.
+- A caniuse-style header and feature metadata panel.
+- All browser support blocks in a horizontal support table.
+- A selected-browser detail view with range-by-range status rows.
+- Tabbed feature sections for:
+  - Info
+  - Notes (when present)
+  - Resources (when present)
+  - Sub-features (when present)
+  - Legend
+- A dedicated legend and keyboard help footer.
 
-In interactive TTY contexts, rendering uses Rich's pager support when available.
+Controls:
+
+- `q` / `Esc`: quit full mode
+- `←` / `→` (or `h` / `l`): move selected browser
+- `↑` / `↓` (or `k` / `j`): scroll selected browser range rows
+- `Tab` / `[` / `]`: switch right-side detail tabs
+- `PgUp` / `PgDn`: scroll tab content
+- `Home` / `End`: jump to top/bottom in detail panes
+
+In non-interactive or piped output contexts, full mode falls back to static wrapped rendering.
 
 ## Parser Model
 
