@@ -165,3 +165,24 @@ def test_fetch_search_and_feature_urls(monkeypatch: pytest.MonkeyPatch) -> None:
         {"static": "1"},
         True,
     )
+
+
+def test_use_shared_client_reuses_one_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _TrackingClient(_FakeClient):
+        instances: ClassVar[int] = 0
+
+        def __init__(self, **kwargs: object) -> None:
+            _ = kwargs
+            _TrackingClient.instances += 1
+
+    _reset_plans((200, "<html>one</html>"), (200, "<html>two</html>"))
+    monkeypatch.setattr(http.httpx, "Client", _TrackingClient)
+
+    with http.use_shared_client():
+        first = http.fetch_html("https://caniuse.com/one")
+        second = http.fetch_html("https://caniuse.com/two")
+
+    assert first == "<html>one</html>"
+    assert second == "<html>two</html>"
+    assert _TrackingClient.instances == 1
+    assert len(_TrackingClient.seen_params) == 2

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 import httpx
 
@@ -10,12 +12,29 @@ from ._version import __version__
 from .constants import DEFAULT_TIMEOUT_SECONDS, FEATURE_URL_TEMPLATE, SEARCH_URL
 from .exceptions import ContentError, HttpStatusError, NetworkError, RequestTimeoutError
 
+_SHARED_CLIENT: ContextVar[httpx.Client | None] = ContextVar(
+    "pycaniuse_shared_client", default=None
+)
+
 
 def _build_headers() -> dict[str, str]:
     return {
         "User-Agent": f"pycaniuse/{__version__}",
         "Accept": "text/html,application/xhtml+xml",
     }
+
+
+@contextmanager
+def use_shared_client(
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
+) -> Iterator[httpx.Client]:
+    """Provide a reusable HTTP client for all fetches within a CLI run."""
+    with httpx.Client(timeout=timeout, follow_redirects=True, headers=_build_headers()) as client:
+        token = _SHARED_CLIENT.set(client)
+        try:
+            yield client
+        finally:
+            _SHARED_CLIENT.reset(token)
 
 
 def fetch_html(
@@ -27,15 +46,19 @@ def fetch_html(
 ) -> str:
     """Fetch an HTML document with deterministic behavior and friendly failures."""
     request_params = dict(params or {})
+    shared_client = _SHARED_CLIENT.get()
 
     def _request(current_params: dict[str, str]) -> str:
         retry_once = True
         while True:
             try:
-                with httpx.Client(
-                    timeout=timeout, follow_redirects=True, headers=_build_headers()
-                ) as client:
-                    response = client.get(url, params=current_params)
+                if shared_client is None or timeout != DEFAULT_TIMEOUT_SECONDS:
+                    with httpx.Client(
+                        timeout=timeout, follow_redirects=True, headers=_build_headers()
+                    ) as client:
+                        response = client.get(url, params=current_params)
+                else:
+                    response = shared_client.get(url, params=current_params)
             except httpx.TimeoutException as exc:
                 raise RequestTimeoutError(url) from exc
             except httpx.ConnectError as exc:
