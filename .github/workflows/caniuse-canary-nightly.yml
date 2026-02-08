@@ -26,4 +26,3 @@ jobs:
 
       - name: Run live caniuse HTML canary test
         run: uv run python -m pytest -m canary -q
-

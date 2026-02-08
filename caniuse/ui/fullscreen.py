@@ -2,15 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from contextlib import contextmanager
-import os
-import select
 import sys
-import termios
 import textwrap
-import tty
-from typing import Protocol, cast
 
 from rich.console import Console
 from rich.panel import Panel
@@ -19,98 +12,6 @@ from rich.text import Text
 from ..constants import STATUS_ICON_MAP, STATUS_LABEL_MAP
 from ..model import FeatureFull
 from ..util.text import extract_note_markers
-
-
-class _MsvcrtModule(Protocol):
-    def kbhit(self) -> bool: ...
-
-    def getwch(self) -> str: ...
-
-
-@contextmanager
-def _raw_mode(enabled: bool) -> Iterator[None]:
-    if not enabled:
-        yield
-        return
-    fd = sys.stdin.fileno()
-    old_settings = termios.tcgetattr(fd)
-    try:
-        tty.setraw(fd)
-        yield
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-
-
-def _read_key(timeout: float = 0.2) -> str | None:
-    if os.name == "nt":  # pragma: no cover
-        import msvcrt as _msvcrt
-
-        msvcrt = cast(_MsvcrtModule, _msvcrt)
-
-        if not msvcrt.kbhit():
-            return None
-        key: str = msvcrt.getwch()
-        if key in {"\x00", "\xe0"}:
-            second: str = msvcrt.getwch()
-            return {
-                "H": "up",
-                "P": "down",
-                "K": "left",
-                "M": "right",
-                "I": "pgup",
-                "Q": "pgdn",
-                "G": "home",
-                "O": "end",
-            }.get(second)
-        if key in {"\n", "\r"}:
-            return "enter"
-        if key == "\x1b":
-            return "esc"
-        if key.lower() == "q":
-            return "q"
-        if key.isdigit():
-            return key
-        return None
-
-    ready, _, _ = select.select([sys.stdin], [], [], timeout)
-    if not ready:
-        return None
-    first = sys.stdin.read(1)
-    if first in {"q", "Q"}:
-        return "q"
-    if first.isdigit():
-        return first
-    if first in {"\n", "\r"}:
-        return "enter"
-    if first != "\x1b":
-        return None
-
-    if not select.select([sys.stdin], [], [], 0.01)[0]:
-        return "esc"
-    second = sys.stdin.read(1)
-    if second != "[":
-        return "esc"
-    if not select.select([sys.stdin], [], [], 0.01)[0]:
-        return "esc"
-    third = sys.stdin.read(1)
-
-    mapping = {
-        "A": "up",
-        "B": "down",
-        "C": "right",
-        "D": "left",
-        "H": "home",
-        "F": "end",
-    }
-    if third in mapping:
-        return mapping[third]
-
-    if third in {"5", "6"} and select.select([sys.stdin], [], [], 0.01)[0]:
-        fourth = sys.stdin.read(1)
-        if fourth == "~":
-            return "pgup" if third == "5" else "pgdn"
-
-    return None
 
 
 def _support_lines(feature: FeatureFull) -> list[str]:

@@ -2,14 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator
-from contextlib import contextmanager
-import os
-import select
+from collections.abc import Iterable
 import sys
-import termios
-import tty
-from typing import Protocol, cast
 
 from rich.console import Console, Group
 from rich.panel import Panel
@@ -17,64 +11,6 @@ from rich.text import Text
 
 from ..model import SearchMatch
 from ..util.text import ellipsize
-
-
-class _MsvcrtModule(Protocol):
-    def kbhit(self) -> bool: ...
-
-    def getwch(self) -> str: ...
-
-
-@contextmanager
-def _raw_mode(enabled: bool) -> Iterator[None]:
-    if not enabled:
-        yield
-        return
-    fd = sys.stdin.fileno()
-    old_settings = termios.tcgetattr(fd)
-    try:
-        tty.setraw(fd)
-        yield
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-
-
-def _read_key(timeout: float = 0.2) -> str | None:
-    if os.name == "nt":  # pragma: no cover
-        import msvcrt as _msvcrt
-
-        msvcrt = cast(_MsvcrtModule, _msvcrt)
-
-        if not msvcrt.kbhit():
-            return None
-        first: str = msvcrt.getwch()
-        if first in {"\x00", "\xe0"}:
-            second: str = msvcrt.getwch()
-            return {"H": "up", "P": "down"}.get(second)
-        if first in {"\r", "\n"}:
-            return "enter"
-        if first == "\x1b":
-            return "esc"
-        if first.lower() == "q":
-            return "q"
-        return None
-
-    ready, _, _ = select.select([sys.stdin], [], [], timeout)
-    if not ready:
-        return None
-    first = sys.stdin.read(1)
-    if first in {"\n", "\r"}:
-        return "enter"
-    if first in {"q", "Q"}:
-        return "q"
-    if first == "\x1b":
-        if select.select([sys.stdin], [], [], 0.01)[0]:
-            second = sys.stdin.read(1)
-            if second == "[" and select.select([sys.stdin], [], [], 0.01)[0]:
-                third = sys.stdin.read(1)
-                return {"A": "up", "B": "down"}.get(third, "esc")
-        return "esc"
-    return None
 
 
 def _build_frame(

@@ -78,24 +78,6 @@ class _FakeInOut:
         return 0
 
 
-class _FakeStdinRead:
-    def __init__(self, chars: str, is_tty: bool = True) -> None:
-        self._chars = list(chars)
-        self._is_tty = is_tty
-
-    def read(self, _: int) -> str:
-        return self._chars.pop(0)
-
-    def isatty(self) -> bool:
-        return self._is_tty
-
-    def fileno(self) -> int:
-        return 0
-
-
-_SelectResult = tuple[list[_FakeStdinRead], list[object], list[object]]
-
-
 def _sample_feature_full() -> FeatureFull:
     return FeatureFull(
         slug="flexbox",
@@ -129,83 +111,6 @@ def _sample_feature_full() -> FeatureFull:
         subfeatures=[("Sub", "https://example.com/sub")],
         tabs={"Notes": "line1", "Resources": "line2", "Sub-features": "line3"},
     )
-
-
-def test_raw_mode_enabled_paths(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[str] = []
-
-    class _RawStdin:
-        def fileno(self) -> int:
-            return 7
-
-    monkeypatch.setattr(ui_select.sys, "stdin", _RawStdin())
-    monkeypatch.setattr(ui_select.termios, "tcgetattr", lambda fd: ["old", fd])
-    monkeypatch.setattr(
-        ui_select.termios,
-        "tcsetattr",
-        lambda fd, _mode, _old: calls.append(f"setattr:{fd}"),
-    )
-    monkeypatch.setattr(ui_select.tty, "setraw", lambda fd: calls.append(f"setraw:{fd}"))
-    with ui_select._raw_mode(enabled=True):
-        calls.append("inside-select")
-
-    monkeypatch.setattr(fs.sys, "stdin", _RawStdin())
-    monkeypatch.setattr(fs.termios, "tcgetattr", lambda fd: ["old", fd])
-    monkeypatch.setattr(fs.termios, "tcsetattr", lambda fd, _mode, _old: calls.append(f"fs:{fd}"))
-    monkeypatch.setattr(fs.tty, "setraw", lambda fd: calls.append(f"fsraw:{fd}"))
-    with fs._raw_mode(enabled=True):
-        calls.append("inside-fullscreen")
-
-    assert "inside-select" in calls
-    assert "inside-fullscreen" in calls
-
-
-def test_raw_mode_disabled_paths() -> None:
-    with ui_select._raw_mode(enabled=False):
-        pass
-    with fs._raw_mode(enabled=False):
-        pass
-
-
-def test_select_read_key_variants(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(ui_select.select, "select", lambda *_args, **_kwargs: ([], [], []))
-    assert ui_select._read_key() is None
-
-    stdin = _FakeStdinRead("\n")
-    monkeypatch.setattr(ui_select.sys, "stdin", stdin)
-    monkeypatch.setattr(ui_select.select, "select", lambda *_args, **_kwargs: ([stdin], [], []))
-    assert ui_select._read_key() == "enter"
-
-    stdin = _FakeStdinRead("q")
-    monkeypatch.setattr(ui_select.sys, "stdin", stdin)
-    monkeypatch.setattr(ui_select.select, "select", lambda *_args, **_kwargs: ([stdin], [], []))
-    assert ui_select._read_key() == "q"
-
-    stdin = _FakeStdinRead("\x1b[A")
-    monkeypatch.setattr(ui_select.sys, "stdin", stdin)
-
-    calls = {"count": 0}
-
-    def _sel(*_args: object, **_kwargs: object) -> _SelectResult:
-        calls["count"] += 1
-        return ([stdin], [], [])
-
-    monkeypatch.setattr(ui_select.select, "select", _sel)
-    assert ui_select._read_key() == "up"
-
-    stdin = _FakeStdinRead("\x1b")
-    monkeypatch.setattr(ui_select.sys, "stdin", stdin)
-    monkeypatch.setattr(
-        ui_select.select,
-        "select",
-        lambda *_args, **_kwargs: ([stdin], [], []) if stdin._chars else ([], [], []),
-    )
-    assert ui_select._read_key() == "esc"
-
-    stdin = _FakeStdinRead("x")
-    monkeypatch.setattr(ui_select.sys, "stdin", stdin)
-    monkeypatch.setattr(ui_select.select, "select", lambda *_args, **_kwargs: ([stdin], [], []))
-    assert ui_select._read_key() is None
 
 
 def test_select_match_non_tty_and_interactive(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -270,83 +175,6 @@ def test_select_build_frame() -> None:
         stop=2,
     )
     assert panel.title == "Select a feature"
-
-
-def test_fullscreen_read_key_branches(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(fs.select, "select", lambda *_args, **_kwargs: ([], [], []))
-    assert fs._read_key() is None
-
-    stdin = _FakeStdinRead("q")
-    monkeypatch.setattr(fs.sys, "stdin", stdin)
-    monkeypatch.setattr(fs.select, "select", lambda *_args, **_kwargs: ([stdin], [], []))
-    assert fs._read_key() == "q"
-
-    stdin = _FakeStdinRead("\x1b[C")
-    monkeypatch.setattr(fs.sys, "stdin", stdin)
-
-    def _sel(*_args: object, **_kwargs: object) -> _SelectResult:
-        return ([stdin], [], [])
-
-    monkeypatch.setattr(fs.select, "select", _sel)
-    assert fs._read_key() == "right"
-
-    stdin = _FakeStdinRead("\x1b[5~")
-    monkeypatch.setattr(fs.sys, "stdin", stdin)
-    monkeypatch.setattr(fs.select, "select", _sel)
-    assert fs._read_key() == "pgup"
-
-    stdin = _FakeStdinRead("7")
-    monkeypatch.setattr(fs.sys, "stdin", stdin)
-    monkeypatch.setattr(fs.select, "select", lambda *_args, **_kwargs: ([stdin], [], []))
-    assert fs._read_key() == "7"
-
-    stdin = _FakeStdinRead("\n")
-    monkeypatch.setattr(fs.sys, "stdin", stdin)
-    monkeypatch.setattr(fs.select, "select", lambda *_args, **_kwargs: ([stdin], [], []))
-    assert fs._read_key() == "enter"
-
-    stdin = _FakeStdinRead("x")
-    monkeypatch.setattr(fs.sys, "stdin", stdin)
-    monkeypatch.setattr(fs.select, "select", lambda *_args, **_kwargs: ([stdin], [], []))
-    assert fs._read_key() is None
-
-    stdin = _FakeStdinRead("\x1b")
-    monkeypatch.setattr(fs.sys, "stdin", stdin)
-    monkeypatch.setattr(
-        fs.select,
-        "select",
-        lambda *_args, **_kwargs: ([stdin], [], []) if stdin._chars else ([], [], []),
-    )
-    assert fs._read_key() == "esc"
-
-
-def test_fullscreen_read_key_escape_variants(monkeypatch: pytest.MonkeyPatch) -> None:
-    stdin = _FakeStdinRead("\x1bX")
-    monkeypatch.setattr(fs.sys, "stdin", stdin)
-    monkeypatch.setattr(
-        fs.select,
-        "select",
-        lambda *_args, **_kwargs: ([stdin], [], []) if stdin._chars else ([], [], []),
-    )
-    assert fs._read_key() == "esc"
-
-    stdin = _FakeStdinRead("\x1b[")
-    monkeypatch.setattr(fs.sys, "stdin", stdin)
-    monkeypatch.setattr(
-        fs.select,
-        "select",
-        lambda *_args, **_kwargs: ([stdin], [], []) if stdin._chars else ([], [], []),
-    )
-    assert fs._read_key() == "esc"
-
-    stdin = _FakeStdinRead("\x1b[9")
-    monkeypatch.setattr(fs.sys, "stdin", stdin)
-    monkeypatch.setattr(
-        fs.select,
-        "select",
-        lambda *_args, **_kwargs: ([stdin], [], []) if stdin._chars else ([], [], []),
-    )
-    assert fs._read_key() is None
 
 
 def test_fullscreen_support_lines_and_non_tty(monkeypatch: pytest.MonkeyPatch) -> None:
