@@ -186,3 +186,48 @@ def test_use_shared_client_reuses_one_client(monkeypatch: pytest.MonkeyPatch) ->
     assert second == "<html>two</html>"
     assert _TrackingClient.instances == 1
     assert len(_TrackingClient.seen_params) == 2
+
+
+def test_use_shared_client_context_resets_after_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _TrackingClient(_FakeClient):
+        instances: ClassVar[int] = 0
+
+        def __init__(self, **kwargs: object) -> None:
+            _ = kwargs
+            _TrackingClient.instances += 1
+
+    _reset_plans(
+        (200, "<html>inside-1</html>"),
+        (200, "<html>inside-2</html>"),
+        (200, "<html>outside</html>"),
+    )
+    monkeypatch.setattr(http.httpx, "Client", _TrackingClient)
+
+    with http.use_shared_client():
+        assert http.fetch_html("https://caniuse.com/inside-1") == "<html>inside-1</html>"
+        assert http.fetch_html("https://caniuse.com/inside-2") == "<html>inside-2</html>"
+
+    assert http.fetch_html("https://caniuse.com/outside") == "<html>outside</html>"
+    assert _TrackingClient.instances == 2
+
+
+def test_fetch_html_custom_timeout_ignores_shared_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _TrackingClient(_FakeClient):
+        instances: ClassVar[int] = 0
+
+        def __init__(self, **kwargs: object) -> None:
+            _ = kwargs
+            _TrackingClient.instances += 1
+
+    _reset_plans((200, "<html>default</html>"), (200, "<html>custom-timeout</html>"))
+    monkeypatch.setattr(http.httpx, "Client", _TrackingClient)
+
+    with http.use_shared_client():
+        assert http.fetch_html("https://caniuse.com/default") == "<html>default</html>"
+        assert (
+            http.fetch_html("https://caniuse.com/custom", timeout=1.5)
+            == "<html>custom-timeout</html>"
+        )
+
+    # One client from shared context + one ephemeral client for custom timeout call.
+    assert _TrackingClient.instances == 2

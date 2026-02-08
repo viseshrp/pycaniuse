@@ -1,10 +1,24 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+
 from click.testing import CliRunner
 from pytest import MonkeyPatch
 
 from caniuse import __version__, cli
 from caniuse.model import BrowserSupportBlock, FeatureBasic, FeatureFull, SearchMatch, SupportRange
+
+
+class _FakeInOut:
+    def __init__(self, is_tty: bool) -> None:
+        self._is_tty = is_tty
+
+    def isatty(self) -> bool:
+        return self._is_tty
+
+    def fileno(self) -> int:
+        return 0
 
 
 def test_help() -> None:
@@ -162,3 +176,121 @@ def test_full_mode_warning_prints(monkeypatch: MonkeyPatch) -> None:
     result = runner.invoke(cli.main, ["flexbox", "--full"])
     assert result.exit_code == 0
     assert "Some sections could not be parsed" in result.output
+
+
+def test_multiple_matches_tty_path_skips_non_interactive_notice(monkeypatch: MonkeyPatch) -> None:
+    @contextmanager
+    def _fake_shared_client() -> Iterator[object]:
+        yield object()
+
+    class _FakeConsole:
+        def __init__(self) -> None:
+            self.printed: list[object] = []
+
+        def print(self, obj: object, **_kwargs: object) -> None:
+            self.printed.append(obj)
+
+    fake_console = _FakeConsole()
+
+    monkeypatch.setattr(cli, "use_shared_client", _fake_shared_client)
+    monkeypatch.setattr(cli, "Console", lambda: fake_console)
+    monkeypatch.setattr(cli, "fetch_search_page", lambda query: "search")
+    monkeypatch.setattr(
+        cli,
+        "parse_search_results",
+        lambda html: [
+            SearchMatch(slug="flexbox", title="Flexbox", href="/flexbox"),
+            SearchMatch(slug="grid", title="Grid", href="/grid"),
+        ],
+    )
+    monkeypatch.setattr(cli.sys, "stdin", _FakeInOut(is_tty=True))
+    monkeypatch.setattr(cli.sys, "stdout", _FakeInOut(is_tty=True))
+    monkeypatch.setattr(cli, "select_match", lambda matches: "grid")
+    monkeypatch.setattr(cli, "fetch_feature_page", lambda slug: "feature")
+    monkeypatch.setattr(
+        cli,
+        "parse_feature_basic",
+        lambda html, slug: FeatureBasic(
+            slug=slug,
+            title="Grid",
+            spec_url=None,
+            spec_status=None,
+            usage_supported=None,
+            usage_partial=None,
+            usage_total=None,
+            description_text="",
+            browser_blocks=[],
+            parse_warnings=[],
+        ),
+    )
+    monkeypatch.setattr(cli, "render_basic", lambda feature_basic: feature_basic.title)
+
+    callback = cli.main.callback
+    assert callback is not None
+    callback(query=("g",), full_mode=False)
+
+    rendered = "\n".join(str(item) for item in fake_console.printed)
+    assert "Grid" in rendered
+    assert "Multiple matches found in non-interactive mode." not in rendered
+
+
+def test_cli_wraps_fetches_in_shared_client_context(monkeypatch: MonkeyPatch) -> None:
+    runner = CliRunner()
+    state = {
+        "entered": 0,
+        "exited": 0,
+        "active": False,
+        "search_in_context": False,
+        "feature_in_context": False,
+    }
+
+    @contextmanager
+    def _fake_shared_client() -> Iterator[object]:
+        state["entered"] += 1
+        state["active"] = True
+        try:
+            yield object()
+        finally:
+            state["active"] = False
+            state["exited"] += 1
+
+    def _fetch_search_page(_query: str) -> str:
+        state["search_in_context"] = state["active"]
+        return "search"
+
+    def _fetch_feature_page(_slug: str) -> str:
+        state["feature_in_context"] = state["active"]
+        return "feature"
+
+    monkeypatch.setattr(cli, "use_shared_client", _fake_shared_client)
+    monkeypatch.setattr(cli, "fetch_search_page", _fetch_search_page)
+    monkeypatch.setattr(
+        cli,
+        "parse_search_results",
+        lambda _html: [SearchMatch(slug="flexbox", title="Flexbox", href="/flexbox")],
+    )
+    monkeypatch.setattr(cli, "fetch_feature_page", _fetch_feature_page)
+    monkeypatch.setattr(
+        cli,
+        "parse_feature_basic",
+        lambda _html, slug: FeatureBasic(
+            slug=slug,
+            title="Flexbox",
+            spec_url=None,
+            spec_status=None,
+            usage_supported=None,
+            usage_partial=None,
+            usage_total=None,
+            description_text="",
+            browser_blocks=[],
+            parse_warnings=[],
+        ),
+    )
+    monkeypatch.setattr(cli, "render_basic", lambda feature_basic: feature_basic.title)
+
+    result = runner.invoke(cli.main, ["flexbox"])
+    assert result.exit_code == 0
+    assert state["entered"] == 1
+    assert state["exited"] == 1
+    assert state["search_in_context"] is True
+    assert state["feature_in_context"] is True

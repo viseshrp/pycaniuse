@@ -8,7 +8,7 @@ import re
 import select
 import sys
 import textwrap
-from typing import Literal
+from typing import Literal, cast
 
 from rich.columns import Columns
 from rich.console import Console, Group
@@ -50,6 +50,7 @@ _ERA_STYLE_MAP = {
     "future": "magenta",
 }
 _GLOBAL_USAGE_RE = re.compile(r"Global usage:\s*([0-9]+(?:\.[0-9]+)?)%")
+_TermiosAttrs = list[int | list[int | bytes]] | list[int | list[int]] | list[int | list[bytes]]
 
 
 @dataclass
@@ -438,9 +439,7 @@ def _build_layout(feature: FeatureFull, state: _TuiState, console: Console) -> L
     )
 
     root["feature"].update(_feature_heading_panel(feature, size.width))
-    root["support"].update(
-        _support_overview_panel(feature, state, size.width - 6, support_rows)
-    )
+    root["support"].update(_support_overview_panel(feature, state, size.width - 6, support_rows))
     root["browser"].update(_support_detail_panel(feature, state, details_rows))
     root["tabs"].update(_tab_panel(feature, state, details_rows))
     root["footer"].update(_footer_panel())
@@ -497,7 +496,11 @@ def _read_key_posix(fd: int) -> _KEY:
 def _read_key_windows() -> _KEY:
     import msvcrt  # pragma: no cover
 
-    char = msvcrt.getwch()
+    getwch = getattr(msvcrt, "getwch", None)
+    if getwch is None:
+        return "noop"
+
+    char = getwch()
     if char in {"q", "Q", "\x1b"}:
         return "quit"
     if char == "\t":
@@ -516,7 +519,7 @@ def _read_key_windows() -> _KEY:
         return "right"
 
     if char in {"\x00", "\xe0"}:
-        special = msvcrt.getwch()
+        special = getwch()
         mapping: dict[str, _KEY] = {
             "H": "up",
             "P": "down",
@@ -534,7 +537,7 @@ def _read_key_windows() -> _KEY:
 class _RawInput:
     def __init__(self) -> None:
         self._fd: int | None = None
-        self._old_settings: object | None = None
+        self._old_settings: _TermiosAttrs | None = None
 
     def __enter__(self) -> _RawInput:
         if os.name == "nt":
@@ -543,7 +546,7 @@ class _RawInput:
         import tty
 
         self._fd = sys.stdin.fileno()
-        self._old_settings = termios.tcgetattr(self._fd)
+        self._old_settings = cast(_TermiosAttrs, termios.tcgetattr(self._fd))
         tty.setcbreak(self._fd)
         return self
 
@@ -625,12 +628,16 @@ def _apply_key(key: _KEY, state: _TuiState, feature: FeatureFull) -> bool:
 
 def _run_tui(console: Console, feature: FeatureFull) -> None:
     state = _TuiState()
-    with _RawInput() as raw, console.screen(hide_cursor=True), Live(
-        _build_layout(feature, state, console),
-        console=console,
-        auto_refresh=False,
-        screen=True,
-    ) as live:
+    with (
+        _RawInput() as raw,
+        console.screen(hide_cursor=True),
+        Live(
+            _build_layout(feature, state, console),
+            console=console,
+            auto_refresh=False,
+            screen=True,
+        ) as live,
+    ):
         while True:
             live.update(_build_layout(feature, state, console), refresh=True)
             key = raw.read_key()

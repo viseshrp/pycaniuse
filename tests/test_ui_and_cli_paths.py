@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import io
 from types import SimpleNamespace
+from typing import Literal
 
 from click.testing import CliRunner
 import pytest
+from rich.console import Console
 from rich.text import Text
 
 from caniuse import cli
@@ -110,6 +113,26 @@ def _sample_feature_full() -> FeatureFull:
         resources=[("Res", "https://example.com")],
         subfeatures=[("Sub", "https://example.com/sub")],
         tabs={"Notes": "line1", "Resources": "line2", "Sub-features": "line3"},
+    )
+
+
+def _sample_support_range(
+    *,
+    title_attr: str = "",
+    raw_classes: tuple[str, ...] = (),
+    status: Literal["y", "n", "a", "u"] = "y",
+    is_past: bool = False,
+    is_current: bool = True,
+    is_future: bool = False,
+) -> SupportRange:
+    return SupportRange(
+        range_text="1-2",
+        status=status,
+        is_past=is_past,
+        is_current=is_current,
+        is_future=is_future,
+        title_attr=title_attr,
+        raw_classes=raw_classes,
     )
 
 
@@ -277,6 +300,84 @@ def test_fullscreen_non_tty_preserves_literal_brackets(monkeypatch: pytest.Monke
         if isinstance(renderable, Text):
             panel_payloads.append(renderable.plain)
     assert any("[older version](https://example.com/old)" in payload for payload in panel_payloads)
+
+
+def test_fullscreen_tab_sections_prefer_parsed_tabs_order() -> None:
+    feature = _sample_feature_full()
+    sections = fs._tab_sections(feature)
+
+    names = [name for name, _ in sections]
+    assert names == ["Info", "Notes", "Resources", "Sub-features", "Legend"]
+    assert sections[1][1] == ["line1"]
+    assert sections[2][1] == ["line2"]
+    assert sections[3][1] == ["line3"]
+
+
+def test_fullscreen_tab_sections_fallback_when_tabs_absent() -> None:
+    feature = _sample_feature_full()
+    feature = FeatureFull(
+        slug=feature.slug,
+        title=feature.title,
+        spec_url=feature.spec_url,
+        spec_status=feature.spec_status,
+        usage_supported=feature.usage_supported,
+        usage_partial=feature.usage_partial,
+        usage_total=feature.usage_total,
+        description_text=feature.description_text,
+        browser_blocks=feature.browser_blocks,
+        parse_warnings=feature.parse_warnings,
+        notes_text="notes fallback",
+        resources=[("Res", "https://example.com")],
+        subfeatures=[("Sub", "https://example.com/sub")],
+        tabs={},
+    )
+
+    names = [name for name, _ in fs._tab_sections(feature)]
+    assert names == ["Info", "Notes", "Resources", "Sub-features", "Legend"]
+
+
+def test_fullscreen_support_line_includes_era_usage_and_notes() -> None:
+    support_range = _sample_support_range(
+        title_attr="Global usage: 12.34% - Partial support",
+        raw_classes=("#3",),
+        status="a",
+        is_past=False,
+        is_current=False,
+        is_future=True,
+    )
+
+    line_with_usage = fs._format_support_line(support_range, include_usage=True).plain
+    assert "[future]" in line_with_usage
+    assert "Partial support" in line_with_usage
+    assert "usage:12.34%" in line_with_usage
+    assert "notes:3" in line_with_usage
+
+    line_without_usage = fs._format_support_line(support_range, include_usage=False).plain
+    assert "usage:12.34%" not in line_without_usage
+
+
+def test_fullscreen_layout_has_expected_sections_without_removed_header() -> None:
+    feature = _sample_feature_full()
+    state = fs._TuiState()
+    console = Console(width=120, height=40, file=io.StringIO(), record=True)
+
+    layout = fs._build_layout(feature, state, console)
+    root_names = [child.name for child in layout.children]
+    assert root_names == ["feature", "support", "details", "footer"]
+    detail_names = [child.name for child in layout["details"].children]
+    assert detail_names == ["browser", "tabs"]
+
+    console.print(layout)
+    rendered = console.export_text()
+    assert "Home   News   Compare browsers   About" not in rendered
+    assert "January 2026 - New feature announcements available on caniuse.com" not in rendered
+    assert "Can I use Flexbox ?   Settings" not in rendered
+    assert "Flexbox" in rendered
+
+
+def test_fullscreen_extract_global_usage_parses_only_expected_pattern() -> None:
+    assert fs._extract_global_usage("Global usage: 1.58% - Supported") == "1.58%"
+    assert fs._extract_global_usage("usage missing label") is None
 
 
 def test_cli_full_mode_and_error_path(monkeypatch: pytest.MonkeyPatch) -> None:
