@@ -57,6 +57,10 @@ def test_caniuse_feature_page_html_shape_is_parseable_live() -> None:
     assert spec_node is not None
     assert attr(spec_node, "href")
     assert text(spec_node)
+    assert any(
+        class_name != "specification" and class_name.isalpha() and len(class_name) <= 4
+        for class_name in class_tokens(spec_node)
+    ), "Spec anchor no longer exposes a short status class token."
 
     # Usage selectors and percentage parsing.
     usage_node = first(doc, 'li.support-stats[data-usage-id="region.global"]')
@@ -91,13 +95,20 @@ def test_caniuse_feature_page_html_shape_is_parseable_live() -> None:
     assert saw_browser_key_class
     assert all_stat_cells
     assert any(
-        any(token in {"y", "n", "a", "u"} for token in class_tokens(stat_cell))
+        any(status_class in {"y", "n", "a", "u"} for status_class in class_tokens(stat_cell))
         for stat_cell in all_stat_cells
     ), "No support status class token found in any stat cell."
     assert any(
         attr(stat_cell, "title") for stat_cell in all_stat_cells
     ), "No stat cell had a title attribute."
     assert any(text(stat_cell) for stat_cell in all_stat_cells), "No stat cell contained text."
+    assert any(
+        any(
+            getattr(child, "name", None) == "#text" and text(child)
+            for child in list(getattr(stat_cell, "children", []))
+        )
+        for stat_cell in all_stat_cells
+    ), "No stat cell contained direct #text child content for range parsing."
 
     # Full-mode optional sections our parser reads.
     notes_node = first(doc, "div.single-page__notes")
