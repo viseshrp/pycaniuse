@@ -2,71 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator
-from contextlib import contextmanager
-import os
-import select
+from collections.abc import Iterable
 import sys
-import termios
-import tty
 
 from rich.console import Console, Group
-from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 
 from ..model import SearchMatch
 from ..util.text import ellipsize
-
-
-@contextmanager
-def _raw_mode(enabled: bool) -> Iterator[None]:
-    if not enabled:
-        yield
-        return
-    fd = sys.stdin.fileno()
-    old_settings = termios.tcgetattr(fd)
-    try:
-        tty.setraw(fd)
-        yield
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-
-
-def _read_key(timeout: float = 0.2) -> str | None:
-    if os.name == "nt":  # pragma: no cover
-        import msvcrt
-
-        if not msvcrt.kbhit():  # type: ignore[attr-defined]
-            return None
-        first: str = msvcrt.getwch()  # type: ignore[attr-defined]
-        if first in {"\x00", "\xe0"}:
-            second: str = msvcrt.getwch()  # type: ignore[attr-defined]
-            return {"H": "up", "P": "down"}.get(second)
-        if first in {"\r", "\n"}:
-            return "enter"
-        if first == "\x1b":
-            return "esc"
-        if first.lower() == "q":
-            return "q"
-        return None
-
-    ready, _, _ = select.select([sys.stdin], [], [], timeout)
-    if not ready:
-        return None
-    first = sys.stdin.read(1)
-    if first in {"\n", "\r"}:
-        return "enter"
-    if first in {"q", "Q"}:
-        return "q"
-    if first == "\x1b":
-        if select.select([sys.stdin], [], [], 0.01)[0]:
-            second = sys.stdin.read(1)
-            if second == "[" and select.select([sys.stdin], [], [], 0.01)[0]:
-                third = sys.stdin.read(1)
-                return {"A": "up", "B": "down"}.get(third, "esc")
-        return "esc"
-    return None
 
 
 def _build_frame(
@@ -99,31 +43,21 @@ def select_match(matches: Iterable[SearchMatch]) -> str | None:
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         return options[0].slug
 
-    selected = 0
-    top = 0
     console = Console()
+    console.print(Text("Select a feature", style="bold cyan"))
+    width = max(console.size.width, 40)
+    for idx, item in enumerate(options, start=1):
+        slug_piece = f"/{item.slug}"
+        text_width = max(width - len(slug_piece) - 10, 10)
+        label = ellipsize(item.title, text_width)
+        console.print(Text(f"{idx:>2}. {label}  {slug_piece}"))
 
-    with (
-        _raw_mode(enabled=(os.name != "nt")),
-        Live(console=console, refresh_per_second=20, transient=True) as live,
-    ):
-        while True:
-            height = max(console.size.height - 6, 5)
-            if selected < top:
-                top = selected
-            if selected >= top + height:
-                top = selected - height + 1
-            stop = min(len(options), top + height)
-            live.update(_build_frame(options, selected, console.size.width, top, stop))
-
-            key = _read_key()
-            if key is None:
-                continue
-            if key == "up":
-                selected = max(0, selected - 1)
-            elif key == "down":
-                selected = min(len(options) - 1, selected + 1)
-            elif key == "enter":
-                return options[selected].slug
-            elif key in {"q", "esc"}:
-                return None
+    while True:
+        choice = console.input("[dim]Enter number (or q to cancel): [/]").strip().lower()
+        if choice in {"q", "quit", "esc"}:
+            return None
+        if choice.isdigit():
+            idx = int(choice)
+            if 1 <= idx <= len(options):
+                return options[idx - 1].slug
+        console.print("Invalid selection. Try again.", style="yellow")

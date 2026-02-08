@@ -39,6 +39,23 @@ jobs:
       - name: Run code quality checks
         run: make check
 
+  caniuse-canary:
+    name: Caniuse HTML canary
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up Python + Environment
+        uses: ./.github/actions/setup-python-env
+
+      - name: Run live caniuse HTML canary test
+        run: uv run python -m pytest -m canary -q
+
   tests:
     runs-on: ${{ matrix.os }}
     strategy:
