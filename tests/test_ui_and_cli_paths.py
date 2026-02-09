@@ -7,6 +7,7 @@ from typing import Literal
 from click.testing import CliRunner
 import pytest
 from rich.console import Console
+from rich.text import Text
 
 from caniuse import cli
 from caniuse.exceptions import CaniuseError
@@ -30,6 +31,19 @@ class _FakePager:
         _tb: object | None,
     ) -> None:
         self._calls.append("exit")
+        return None
+
+
+class _FakeScreen:
+    def __enter__(self) -> _FakeScreen:
+        return self
+
+    def __exit__(
+        self,
+        _exc_type: type[BaseException] | None,
+        _exc: BaseException | None,
+        _tb: object | None,
+    ) -> None:
         return None
 
 
@@ -60,6 +74,10 @@ class _FakeConsole:
     def pager(self, *, styles: bool = False) -> _FakePager:
         self.pager_styles.append(styles)
         return _FakePager(self.pager_calls)
+
+    def screen(self, *, hide_cursor: bool = False) -> _FakeScreen:
+        _ = hide_cursor
+        return _FakeScreen()
 
 
 class _FakeConsoleNoPager:
@@ -162,6 +180,7 @@ def test_select_match_non_tty_and_interactive(monkeypatch: pytest.MonkeyPatch) -
     assert ui_select.select_match(matches) == "a"
 
     monkeypatch.setattr(ui_select, "Console", lambda: _FakeConsole(inputs=["2"]))
+    monkeypatch.setattr(ui_select, "_supports_key_loop", lambda _console: False)
     monkeypatch.setattr(ui_select.sys, "stdin", _FakeInOut(is_tty=True))
     monkeypatch.setattr(ui_select.sys, "stdout", _FakeInOut(is_tty=True))
 
@@ -173,6 +192,7 @@ def test_select_match_cancel_and_single_item(monkeypatch: pytest.MonkeyPatch) ->
     assert ui_select.select_match([SearchMatch(slug="a", title="A", href="/a")]) == "a"
 
     monkeypatch.setattr(ui_select, "Console", lambda: _FakeConsole(inputs=["q"]))
+    monkeypatch.setattr(ui_select, "_supports_key_loop", lambda _console: False)
     monkeypatch.setattr(ui_select.sys, "stdin", _FakeInOut(is_tty=True))
     monkeypatch.setattr(ui_select.sys, "stdout", _FakeInOut(is_tty=True))
 
@@ -194,10 +214,12 @@ def test_select_match_invalid_then_valid(monkeypatch: pytest.MonkeyPatch) -> Non
     ]
     fake_console = _FakeConsole(inputs=["bad", "3", "2"])
     monkeypatch.setattr(ui_select, "Console", lambda: fake_console)
+    monkeypatch.setattr(ui_select, "_supports_key_loop", lambda _console: False)
     monkeypatch.setattr(ui_select.sys, "stdin", _FakeInOut(is_tty=True))
     monkeypatch.setattr(ui_select.sys, "stdout", _FakeInOut(is_tty=True))
 
     assert ui_select.select_match(matches) == "b"
+    assert "Invalid selection. Try again." in fake_console.printed
 
 
 def test_select_build_frame() -> None:
@@ -212,6 +234,71 @@ def test_select_build_frame() -> None:
         stop=2,
     )
     assert panel.title == "Select a feature"
+    group = panel.renderable
+    renderables = list(getattr(group, "renderables", []))
+    footer = renderables[-1]
+    assert isinstance(footer, Text)
+    assert "move" in footer.plain
+    assert "Enter select" in footer.plain
+
+
+def test_select_match_interactive_key_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    matches = [
+        SearchMatch(slug="a", title="A", href="/a"),
+        SearchMatch(slug="b", title="B", href="/b"),
+        SearchMatch(slug="c", title="C", href="/c"),
+    ]
+    monkeypatch.setattr(ui_select.sys, "stdin", _FakeInOut(is_tty=True))
+    monkeypatch.setattr(ui_select.sys, "stdout", _FakeInOut(is_tty=True))
+    monkeypatch.setattr(ui_select, "_supports_key_loop", lambda _console: True)
+
+    class _FakeLive:
+        def __init__(self) -> None:
+            self.frames: list[object] = []
+
+        def __enter__(self) -> _FakeLive:
+            return self
+
+        def __exit__(
+            self,
+            _exc_type: type[BaseException] | None,
+            _exc: BaseException | None,
+            _tb: object | None,
+        ) -> None:
+            return None
+
+        def update(self, frame: object, *, refresh: bool = False) -> None:
+            _ = refresh
+            self.frames.append(frame)
+
+    fake_console = _FakeConsole(width=120, height=40)
+    monkeypatch.setattr(ui_select, "Console", lambda: fake_console)
+
+    keys = iter(["down", "down", "up", "enter"])
+
+    class _FakeRawInput:
+        def __enter__(self) -> _FakeRawInput:
+            return self
+
+        def __exit__(
+            self,
+            _exc_type: type[BaseException] | None,
+            _exc: BaseException | None,
+            _tb: object | None,
+        ) -> None:
+            return None
+
+        def read_key(self) -> str:
+            return next(keys)
+
+    monkeypatch.setattr(ui_select, "_RawInput", _FakeRawInput)
+
+    def _fake_live_factory(*_args: object, **_kwargs: object) -> _FakeLive:
+        return _FakeLive()
+
+    monkeypatch.setattr(ui_select, "Live", _fake_live_factory)
+
+    assert ui_select.select_match(matches) == "b"
 
 
 def test_fullscreen_support_lines_and_non_tty(monkeypatch: pytest.MonkeyPatch) -> None:
