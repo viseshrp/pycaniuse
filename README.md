@@ -84,15 +84,11 @@ Status icons:
 
 Shows an expanded Rich-rendered view, including:
 
-- A feature metadata panel with usage summary.
-- A full support table across all browser blocks and ranges.
-- Feature sections for:
-  - Info
-  - Notes (when present)
-  - Resources (when present)
-  - Sub-features (when present)
-  - Legend
-- A dedicated legend and usage footer.
+- A caniuse-style top area with nav links, news line, and search strip.
+- A feature block with title, spec status, global usage, and description.
+- Per-browser support cards that mirror support-list columns.
+- Notes/resources/sub-feature sections similar to caniuse detail blocks.
+- Site/footer-style paneling plus legend and pager hints.
 
 Controls:
 
