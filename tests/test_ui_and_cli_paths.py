@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import io
 from types import SimpleNamespace
+from typing import Literal
 
 from click.testing import CliRunner
 import pytest
-from rich.text import Text
+from rich.console import Console
 
 from caniuse import cli
 from caniuse.exceptions import CaniuseError
@@ -42,7 +44,15 @@ class _FakeConsole:
     def print(self, obj: object, **_kwargs: object) -> None:
         self.printed.append(obj)
 
-    def input(self, _prompt: str = "") -> str:
+    def input(
+        self,
+        _prompt: str = "",
+        *,
+        password: bool = False,
+        stream: object | None = None,
+    ) -> str:
+        _ = password
+        _ = stream
         if self._inputs:
             return self._inputs.pop(0)
         return "q"
@@ -61,7 +71,15 @@ class _FakeConsoleNoPager:
     def print(self, obj: object, **_kwargs: object) -> None:
         self.printed.append(obj)
 
-    def input(self, _prompt: str = "") -> str:
+    def input(
+        self,
+        _prompt: str = "",
+        *,
+        password: bool = False,
+        stream: object | None = None,
+    ) -> str:
+        _ = password
+        _ = stream
         if self._inputs:
             return self._inputs.pop(0)
         return "q"
@@ -113,6 +131,26 @@ def _sample_feature_full() -> FeatureFull:
     )
 
 
+def _sample_support_range(
+    *,
+    title_attr: str = "",
+    raw_classes: tuple[str, ...] = (),
+    status: Literal["y", "n", "a", "u"] = "y",
+    is_past: bool = False,
+    is_current: bool = True,
+    is_future: bool = False,
+) -> SupportRange:
+    return SupportRange(
+        range_text="1-2",
+        status=status,
+        is_past=is_past,
+        is_current=is_current,
+        is_future=is_future,
+        title_attr=title_attr,
+        raw_classes=raw_classes,
+    )
+
+
 def test_select_match_non_tty_and_interactive(monkeypatch: pytest.MonkeyPatch) -> None:
     matches = [
         SearchMatch(slug="a", title="A", href="/a"),
@@ -160,7 +198,6 @@ def test_select_match_invalid_then_valid(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(ui_select.sys, "stdout", _FakeInOut(is_tty=True))
 
     assert ui_select.select_match(matches) == "b"
-    assert "Invalid selection. Try again." in fake_console.printed
 
 
 def test_select_build_frame() -> None:
@@ -190,22 +227,17 @@ def test_fullscreen_support_lines_and_non_tty(monkeypatch: pytest.MonkeyPatch) -
     assert fake_console.printed
 
 
-def test_fullscreen_tty_uses_tui(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fullscreen_tty_uses_pager(monkeypatch: pytest.MonkeyPatch) -> None:
     feature = _sample_feature_full()
     fake_console = _FakeConsole(width=40, height=10)
-    called = {"tui": False}
-
-    def _run_tui(console: object, arg_feature: FeatureFull) -> None:
-        called["tui"] = True
-        assert console is fake_console
-        assert arg_feature is feature
 
     monkeypatch.setattr(fs, "Console", lambda: fake_console)
-    monkeypatch.setattr(fs, "_supports_tui", lambda _console: True)
-    monkeypatch.setattr(fs, "_run_tui", _run_tui)
+    monkeypatch.setattr(fs.sys, "stdin", _FakeInOut(is_tty=True))
+    monkeypatch.setattr(fs.sys, "stdout", _FakeInOut(is_tty=True))
 
     fs.run_fullscreen(feature)
-    assert called["tui"] is True
+    assert fake_console.pager_calls == ["enter", "exit"]
+    assert fake_console.pager_styles == [True]
 
 
 def test_fullscreen_tty_without_pager_falls_back_to_print(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -264,19 +296,86 @@ def test_fullscreen_non_tty_preserves_literal_brackets(monkeypatch: pytest.Monke
         tabs={"Notes": "[older version](https://example.com/old)"},
     )
 
-    fake_console = _FakeConsole()
-    monkeypatch.setattr(fs, "Console", lambda: fake_console)
+    console = Console(width=120, height=40, file=io.StringIO(), record=True)
+    monkeypatch.setattr(fs, "Console", lambda: console)
     monkeypatch.setattr(fs.sys, "stdin", _FakeInOut(is_tty=False))
     monkeypatch.setattr(fs.sys, "stdout", _FakeInOut(is_tty=False))
 
     fs.run_fullscreen(feature)
 
-    panel_payloads = []
-    for obj in fake_console.printed:
-        renderable = getattr(obj, "renderable", None)
-        if isinstance(renderable, Text):
-            panel_payloads.append(renderable.plain)
-    assert any("[older version](https://example.com/old)" in payload for payload in panel_payloads)
+    rendered = console.export_text()
+    assert "[older version](https://example.com/old)" in rendered
+
+
+def test_fullscreen_tab_sections_prefer_parsed_tabs_order() -> None:
+    feature = _sample_feature_full()
+    sections = fs._tab_sections(feature)
+
+    names = [name for name, _ in sections]
+    assert names == ["Info", "Notes", "Resources", "Sub-features", "Legend"]
+    assert sections[1][1] == ["line1"]
+    assert sections[2][1] == ["line2"]
+    assert sections[3][1] == ["line3"]
+
+
+def test_fullscreen_tab_sections_fallback_when_tabs_absent() -> None:
+    feature = _sample_feature_full()
+    feature = FeatureFull(
+        slug=feature.slug,
+        title=feature.title,
+        spec_url=feature.spec_url,
+        spec_status=feature.spec_status,
+        usage_supported=feature.usage_supported,
+        usage_partial=feature.usage_partial,
+        usage_total=feature.usage_total,
+        description_text=feature.description_text,
+        browser_blocks=feature.browser_blocks,
+        parse_warnings=feature.parse_warnings,
+        notes_text="notes fallback",
+        resources=[("Res", "https://example.com")],
+        subfeatures=[("Sub", "https://example.com/sub")],
+        tabs={},
+    )
+
+    names = [name for name, _ in fs._tab_sections(feature)]
+    assert names == ["Info", "Notes", "Resources", "Sub-features", "Legend"]
+
+
+def test_fullscreen_support_line_includes_era_usage_and_notes() -> None:
+    support_range = _sample_support_range(
+        title_attr="Global usage: 12.34% - Partial support",
+        raw_classes=("#3",),
+        status="a",
+        is_past=False,
+        is_current=False,
+        is_future=True,
+    )
+
+    line_with_usage = fs._format_support_line(support_range, include_usage=True).plain
+    assert "[future]" in line_with_usage
+    assert "Partial support" in line_with_usage
+    assert "usage:12.34%" in line_with_usage
+    assert "notes:3" in line_with_usage
+
+    line_without_usage = fs._format_support_line(support_range, include_usage=False).plain
+    assert "usage:12.34%" not in line_without_usage
+
+
+def test_fullscreen_layout_has_expected_sections_without_removed_header() -> None:
+    feature = _sample_feature_full()
+    console = Console(width=120, height=40, file=io.StringIO(), record=True)
+
+    console.print(fs._build_full_renderable(feature, console.size.width))
+    rendered = console.export_text()
+    assert "Home   News   Compare browsers   About" not in rendered
+    assert "January 2026 - New feature announcements available on caniuse.com" not in rendered
+    assert "Can I use Flexbox ?   Settings" not in rendered
+    assert "Flexbox" in rendered
+
+
+def test_fullscreen_extract_global_usage_parses_only_expected_pattern() -> None:
+    assert fs._extract_global_usage("Global usage: 1.58% - Supported") == "1.58%"
+    assert fs._extract_global_usage("usage missing label") is None
 
 
 def test_cli_full_mode_and_error_path(monkeypatch: pytest.MonkeyPatch) -> None:

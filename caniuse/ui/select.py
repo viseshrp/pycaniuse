@@ -7,6 +7,7 @@ import sys
 
 from rich.console import Console, Group
 from rich.panel import Panel
+from rich.prompt import Prompt
 from rich.text import Text
 
 from ..model import SearchMatch
@@ -44,20 +45,18 @@ def select_match(matches: Iterable[SearchMatch]) -> str | None:
         return options[0].slug
 
     console = Console()
-    console.print(Text("Select a feature", style="bold cyan"))
     width = max(console.size.width, 40)
-    for idx, item in enumerate(options, start=1):
-        slug_piece = f"/{item.slug}"
-        text_width = max(width - len(slug_piece) - 10, 10)
-        label = ellipsize(item.title, text_width)
-        console.print(Text(f"{idx:>2}. {label}  {slug_piece}"))
+    console.print(_build_frame(options, selected_idx=0, width=width, start=0, stop=len(options)))
 
-    while True:
-        choice = console.input("[dim]Enter number (or q to cancel): [/]").strip().lower()
-        if choice in {"q", "quit", "esc"}:
-            return None
-        if choice.isdigit():
-            idx = int(choice)
-            if 1 <= idx <= len(options):
-                return options[idx - 1].slug
-        console.print("Invalid selection. Try again.", style="yellow")
+    choices = [str(index) for index in range(1, len(options) + 1)]
+    selected = Prompt.ask(
+        "Enter number (or q to cancel)",
+        choices=[*choices, "q"],
+        case_sensitive=False,
+        default="1",
+        show_choices=False,
+        console=console,
+    )
+    if selected.lower() == "q":
+        return None
+    return options[int(selected) - 1].slug

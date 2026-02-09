@@ -186,3 +186,115 @@ def test_use_shared_client_reuses_one_client(monkeypatch: pytest.MonkeyPatch) ->
     assert second == "<html>two</html>"
     assert _TrackingClient.instances == 1
     assert len(_TrackingClient.seen_params) == 2
+
+
+def test_use_shared_client_context_resets_after_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _TrackingClient(_FakeClient):
+        instances: ClassVar[int] = 0
+
+        def __init__(self, **kwargs: object) -> None:
+            _ = kwargs
+            _TrackingClient.instances += 1
+
+    _reset_plans(
+        (200, "<html>inside-1</html>"),
+        (200, "<html>inside-2</html>"),
+        (200, "<html>outside</html>"),
+    )
+    monkeypatch.setattr(http.httpx, "Client", _TrackingClient)
+
+    with http.use_shared_client():
+        assert http.fetch_html("https://caniuse.com/inside-1") == "<html>inside-1</html>"
+        assert http.fetch_html("https://caniuse.com/inside-2") == "<html>inside-2</html>"
+
+    assert http.fetch_html("https://caniuse.com/outside") == "<html>outside</html>"
+    assert _TrackingClient.instances == 2
+
+
+def test_fetch_html_custom_timeout_ignores_shared_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _TrackingClient(_FakeClient):
+        instances: ClassVar[int] = 0
+
+        def __init__(self, **kwargs: object) -> None:
+            _ = kwargs
+            _TrackingClient.instances += 1
+
+    _reset_plans((200, "<html>default</html>"), (200, "<html>custom-timeout</html>"))
+    monkeypatch.setattr(http.httpx, "Client", _TrackingClient)
+
+    with http.use_shared_client():
+        assert http.fetch_html("https://caniuse.com/default") == "<html>default</html>"
+        assert (
+            http.fetch_html("https://caniuse.com/custom", timeout=1.5)
+            == "<html>custom-timeout</html>"
+        )
+
+    # One client from shared context + one ephemeral client for custom timeout call.
+    assert _TrackingClient.instances == 2
+
+
+def test_fetch_html_fallback_with_shared_client_reuses_one_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _TrackingClient(_FakeClient):
+        instances: ClassVar[int] = 0
+
+        def __init__(self, **kwargs: object) -> None:
+            _ = kwargs
+            _TrackingClient.instances += 1
+
+    _TrackingClient.instances = 0
+    _reset_plans((404, "missing"), (200, "<html>fallback</html>"))
+    monkeypatch.setattr(http.httpx, "Client", _TrackingClient)
+
+    with http.use_shared_client():
+        result = http.fetch_html(
+            "https://caniuse.com/flexbox",
+            params={"static": "1", "search": "flexbox"},
+            allow_static_fallback=True,
+        )
+
+    assert result == "<html>fallback</html>"
+    assert _TrackingClient.instances == 1
+    assert _TrackingClient.seen_params[0] == {"static": "1", "search": "flexbox"}
+    assert _TrackingClient.seen_params[1] == {"search": "flexbox"}
+
+
+def test_use_shared_client_applies_custom_timeout_to_shared_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _TimeoutClient:
+        created_timeouts: ClassVar[list[float | None]] = []
+
+        def __init__(self, **kwargs: object) -> None:
+            timeout_value = kwargs.get("timeout")
+            if isinstance(timeout_value, (int, float)):
+                _TimeoutClient.created_timeouts.append(float(timeout_value))
+            else:
+                _TimeoutClient.created_timeouts.append(None)
+
+        def __enter__(self) -> _TimeoutClient:
+            return self
+
+        def __exit__(
+            self,
+            _exc_type: type[BaseException] | None,
+            _exc: BaseException | None,
+            _tb: object | None,
+        ) -> None:
+            return None
+
+        def get(self, url: str, params: dict[str, str] | None = None) -> httpx.Response:
+            return httpx.Response(
+                200,
+                text="<html>ok</html>",
+                request=httpx.Request("GET", url, params=params),
+            )
+
+    _TimeoutClient.created_timeouts = []
+    monkeypatch.setattr(http.httpx, "Client", _TimeoutClient)
+
+    with http.use_shared_client(timeout=2.5):
+        assert http.fetch_html("https://caniuse.com/flexbox") == "<html>ok</html>"
+
+    assert _TimeoutClient.created_timeouts == [2.5]
