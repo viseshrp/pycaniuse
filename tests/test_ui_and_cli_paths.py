@@ -227,17 +227,22 @@ def test_fullscreen_support_lines_and_non_tty(monkeypatch: pytest.MonkeyPatch) -
     assert fake_console.printed
 
 
-def test_fullscreen_tty_uses_pager(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fullscreen_tty_uses_tui(monkeypatch: pytest.MonkeyPatch) -> None:
     feature = _sample_feature_full()
     fake_console = _FakeConsole(width=40, height=10)
+    called = {"tui": False}
+
+    def _run_tui(console: object, arg_feature: FeatureFull) -> None:
+        called["tui"] = True
+        assert console is fake_console
+        assert arg_feature is feature
 
     monkeypatch.setattr(fs, "Console", lambda: fake_console)
-    monkeypatch.setattr(fs.sys, "stdin", _FakeInOut(is_tty=True))
-    monkeypatch.setattr(fs.sys, "stdout", _FakeInOut(is_tty=True))
+    monkeypatch.setattr(fs, "_supports_tui", lambda _console: True)
+    monkeypatch.setattr(fs, "_run_tui", _run_tui)
 
     fs.run_fullscreen(feature)
-    assert fake_console.pager_calls == ["enter", "exit"]
-    assert fake_console.pager_styles == [True]
+    assert called["tui"] is True
 
 
 def test_fullscreen_tty_without_pager_falls_back_to_print(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -363,9 +368,16 @@ def test_fullscreen_support_line_includes_era_usage_and_notes() -> None:
 
 def test_fullscreen_layout_has_expected_sections_without_removed_header() -> None:
     feature = _sample_feature_full()
+    state = fs._TuiState()
     console = Console(width=120, height=40, file=io.StringIO(), record=True)
 
-    console.print(fs._build_full_renderable(feature, console.size.width))
+    layout = fs._build_layout(feature, state, console)
+    root_names = [child.name for child in layout.children]
+    assert root_names == ["feature", "support", "details", "footer"]
+    detail_names = [child.name for child in layout["details"].children]
+    assert detail_names == ["browser", "tabs"]
+
+    console.print(layout)
     rendered = console.export_text()
     assert "Home   News   Compare browsers   About" not in rendered
     assert "January 2026 - New feature announcements available on caniuse.com" not in rendered
