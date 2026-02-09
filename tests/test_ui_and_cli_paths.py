@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 import io
-from types import SimpleNamespace
-from typing import Literal
+from types import ModuleType, SimpleNamespace
+from typing import Literal, cast
 
 from click.testing import CliRunner
 import pytest
@@ -553,3 +554,528 @@ def test_cli_multiple_results_cancel_and_basic_warning(monkeypatch: pytest.Monke
     result = runner.invoke(cli.main, ["f"])
     assert result.exit_code == 0
     assert "Some sections could not be parsed" in result.output
+
+
+def test_select_low_level_key_and_window_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert ui_select._visible_window(selected_idx=2, total=3, height=20) == (0, 3)
+    assert ui_select._visible_window(selected_idx=9, total=20, height=10) == (7, 11)
+    assert ui_select._decode_escape_sequence(b"[A") == "up"
+    assert ui_select._decode_escape_sequence(b"[B") == "down"
+    assert ui_select._decode_escape_sequence(b"[C") == "quit"
+
+    monkeypatch.setattr(ui_select.os, "read", lambda _fd, _n: b"")
+    assert ui_select._read_key_posix(0) == "noop"
+
+    monkeypatch.setattr(ui_select.os, "read", lambda _fd, _n: b"q")
+    assert ui_select._read_key_posix(0) == "quit"
+
+    monkeypatch.setattr(ui_select.os, "read", lambda _fd, _n: b"\n")
+    assert ui_select._read_key_posix(0) == "enter"
+
+    monkeypatch.setattr(ui_select.os, "read", lambda _fd, _n: b"k")
+    assert ui_select._read_key_posix(0) == "up"
+
+    monkeypatch.setattr(ui_select.os, "read", lambda _fd, _n: b"j")
+    assert ui_select._read_key_posix(0) == "down"
+
+    chunks_up = iter([b"\x1b", b"[", b"A"])
+    monkeypatch.setattr(ui_select.os, "read", lambda _fd, _n: next(chunks_up))
+    monkeypatch.setattr(ui_select.select, "select", lambda *_args, **_kwargs: ([0], [], []))
+    assert ui_select._read_key_posix(0) == "up"
+
+    chunks_unknown = iter([b"\x1b", b"[", b"C"])
+    ready: Iterator[tuple[list[int], list[int], list[int]]] = iter(
+        [([0], [], []), ([0], [], []), ([], [], [])]
+    )
+    monkeypatch.setattr(ui_select.os, "read", lambda _fd, _n: next(chunks_unknown))
+    monkeypatch.setattr(ui_select.select, "select", lambda *_args, **_kwargs: next(ready))
+    assert ui_select._read_key_posix(0) == "quit"
+
+
+def test_select_windows_raw_input_and_support_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_mod_no_getwch = ModuleType("msvcrt")
+    monkeypatch.setitem(ui_select.sys.modules, "msvcrt", fake_mod_no_getwch)
+    assert ui_select._read_key_windows() == "noop"
+
+    def _set_windows_chars(chars: list[str]) -> None:
+        fake_mod = ModuleType("msvcrt")
+        data = list(chars)
+        fake_mod.getwch = lambda: data.pop(0)  # type: ignore[attr-defined]
+        monkeypatch.setitem(ui_select.sys.modules, "msvcrt", fake_mod)
+
+    _set_windows_chars(["q"])
+    assert ui_select._read_key_windows() == "quit"
+    _set_windows_chars(["\r"])
+    assert ui_select._read_key_windows() == "enter"
+    _set_windows_chars(["k"])
+    assert ui_select._read_key_windows() == "up"
+    _set_windows_chars(["j"])
+    assert ui_select._read_key_windows() == "down"
+    _set_windows_chars(["\xe0", "H"])
+    assert ui_select._read_key_windows() == "up"
+    _set_windows_chars(["\xe0", "P"])
+    assert ui_select._read_key_windows() == "down"
+    _set_windows_chars(["\xe0", "X"])
+    assert ui_select._read_key_windows() == "noop"
+    _set_windows_chars(["x"])
+    assert ui_select._read_key_windows() == "noop"
+
+    monkeypatch.setattr(ui_select.os, "name", "nt", raising=False)
+    raw = ui_select._RawInput()
+    with raw:
+        monkeypatch.setattr(ui_select, "_read_key_windows", lambda: "up")
+        assert raw.read_key() == "up"
+
+    calls: dict[str, int] = {"setcbreak": 0, "tcsetattr": 0}
+    tty_mod = ModuleType("tty")
+    tty_mod.setcbreak = lambda _fd: calls.__setitem__("setcbreak", calls["setcbreak"] + 1)  # type: ignore[attr-defined]
+    termios_mod = ModuleType("termios")
+    termios_mod.TCSADRAIN = 1  # type: ignore[attr-defined]
+    termios_mod.tcgetattr = lambda _fd: "old"  # type: ignore[attr-defined]
+    termios_mod.tcsetattr = lambda _fd, _when, _old: calls.__setitem__(  # type: ignore[attr-defined]
+        "tcsetattr", calls["tcsetattr"] + 1
+    )
+    monkeypatch.setitem(ui_select.sys.modules, "tty", tty_mod)
+    monkeypatch.setitem(ui_select.sys.modules, "termios", termios_mod)
+    monkeypatch.setattr(ui_select.os, "name", "posix", raising=False)
+    monkeypatch.setattr(ui_select.sys, "stdin", SimpleNamespace(fileno=lambda: 7, read=lambda: ""))
+
+    raw = ui_select._RawInput()
+    raw.__enter__()
+    monkeypatch.setattr(ui_select, "_read_key_posix", lambda _fd: "down")
+    assert raw.read_key() == "down"
+    raw.__exit__(None, None, None)
+    assert calls["setcbreak"] == 1
+    assert calls["tcsetattr"] == 1
+
+    raw = ui_select._RawInput()
+    assert raw.read_key() == "noop"
+    raw.__exit__(None, None, None)
+
+    good_inout = SimpleNamespace(
+        isatty=lambda: True,
+        fileno=lambda: 0,
+        read=lambda: "",
+    )
+    monkeypatch.setattr(ui_select.sys, "stdin", good_inout)
+    monkeypatch.setattr(ui_select.sys, "stdout", good_inout)
+    assert ui_select._supports_key_loop(cast(Console, _FakeConsole())) is True
+
+    monkeypatch.setattr(ui_select.sys, "stdin", _FakeInOut(is_tty=False))
+    assert ui_select._supports_key_loop(cast(Console, _FakeConsole())) is False
+
+    monkeypatch.setattr(ui_select.sys, "stdin", _FakeInOut(is_tty=True))
+    monkeypatch.setattr(ui_select.sys, "stdout", _FakeInOut(is_tty=True))
+    assert ui_select._supports_key_loop(cast(Console, object())) is False
+
+    monkeypatch.setattr(
+        ui_select.sys,
+        "stdin",
+        SimpleNamespace(isatty=lambda: True, fileno=lambda: 0),
+    )
+    assert ui_select._supports_key_loop(cast(Console, _FakeConsole())) is False
+
+    monkeypatch.setattr(
+        ui_select.sys,
+        "stdin",
+        SimpleNamespace(
+            isatty=lambda: True,
+            read=lambda: "",
+            fileno=lambda: (_ for _ in ()).throw(ValueError("x")),
+        ),
+    )
+    assert ui_select._supports_key_loop(cast(Console, _FakeConsole())) is False
+
+
+def test_select_match_interactive_quit_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    matches = [
+        SearchMatch(slug="a", title="A", href="/a"),
+        SearchMatch(slug="b", title="B", href="/b"),
+    ]
+    monkeypatch.setattr(ui_select.sys, "stdin", _FakeInOut(is_tty=True))
+    monkeypatch.setattr(ui_select.sys, "stdout", _FakeInOut(is_tty=True))
+    monkeypatch.setattr(ui_select, "_supports_key_loop", lambda _console: True)
+    monkeypatch.setattr(ui_select, "Console", lambda: _FakeConsole())
+
+    class _FakeRawInput:
+        def __enter__(self) -> _FakeRawInput:
+            return self
+
+        def __exit__(
+            self,
+            _exc_type: type[BaseException] | None,
+            _exc: BaseException | None,
+            _tb: object | None,
+        ) -> None:
+            return None
+
+        def read_key(self) -> str:
+            return "quit"
+
+    class _FakeLive:
+        def __enter__(self) -> _FakeLive:
+            return self
+
+        def __exit__(
+            self,
+            _exc_type: type[BaseException] | None,
+            _exc: BaseException | None,
+            _tb: object | None,
+        ) -> None:
+            return None
+
+        def update(self, _frame: object, *, refresh: bool = False) -> None:
+            _ = refresh
+
+    monkeypatch.setattr(ui_select, "_RawInput", _FakeRawInput)
+    monkeypatch.setattr(ui_select, "Live", lambda *_args, **_kwargs: _FakeLive())
+    assert ui_select.select_match(matches) is None
+
+
+def test_fullscreen_low_level_key_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert fs._decode_escape_sequence(b"[A") == "up"
+    assert fs._decode_escape_sequence(b"[B") == "down"
+    assert fs._decode_escape_sequence(b"[C") == "right"
+    assert fs._decode_escape_sequence(b"[D") == "left"
+    assert fs._decode_escape_sequence(b"[5~") == "pageup"
+    assert fs._decode_escape_sequence(b"[6~") == "pagedown"
+    assert fs._decode_escape_sequence(b"[H") == "home"
+    assert fs._decode_escape_sequence(b"[F") == "end"
+    assert fs._decode_escape_sequence(b"[Z") == "shift_tab"
+    assert fs._decode_escape_sequence(b"[X") == "quit"
+
+    monkeypatch.setattr(fs.os, "read", lambda _fd, _n: b"")
+    assert fs._read_key_posix(0) == "noop"
+
+    monkeypatch.setattr(fs.os, "read", lambda _fd, _n: b"q")
+    assert fs._read_key_posix(0) == "quit"
+    monkeypatch.setattr(fs.os, "read", lambda _fd, _n: b"\t")
+    assert fs._read_key_posix(0) == "tab"
+    monkeypatch.setattr(fs.os, "read", lambda _fd, _n: b"\n")
+    assert fs._read_key_posix(0) == "noop"
+    monkeypatch.setattr(fs.os, "read", lambda _fd, _n: b"[")
+    assert fs._read_key_posix(0) == "prev_tab"
+    monkeypatch.setattr(fs.os, "read", lambda _fd, _n: b"]")
+    assert fs._read_key_posix(0) == "next_tab"
+    monkeypatch.setattr(fs.os, "read", lambda _fd, _n: b"h")
+    assert fs._read_key_posix(0) == "left"
+    monkeypatch.setattr(fs.os, "read", lambda _fd, _n: b"j")
+    assert fs._read_key_posix(0) == "down"
+    monkeypatch.setattr(fs.os, "read", lambda _fd, _n: b"k")
+    assert fs._read_key_posix(0) == "up"
+    monkeypatch.setattr(fs.os, "read", lambda _fd, _n: b"l")
+    assert fs._read_key_posix(0) == "right"
+    monkeypatch.setattr(fs.os, "read", lambda _fd, _n: b"x")
+    assert fs._read_key_posix(0) == "noop"
+
+    chunks_up = iter([b"\x1b", b"[", b"A"])
+    monkeypatch.setattr(fs.os, "read", lambda _fd, _n: next(chunks_up))
+    monkeypatch.setattr(fs.select, "select", lambda *_args, **_kwargs: ([0], [], []))
+    assert fs._read_key_posix(0) == "up"
+
+    chunks_unknown = iter([b"\x1b", b"[", b"X"])
+    ready: Iterator[tuple[list[int], list[int], list[int]]] = iter(
+        [([0], [], []), ([0], [], []), ([], [], [])]
+    )
+    monkeypatch.setattr(fs.os, "read", lambda _fd, _n: next(chunks_unknown))
+    monkeypatch.setattr(fs.select, "select", lambda *_args, **_kwargs: next(ready))
+    assert fs._read_key_posix(0) == "quit"
+
+
+def test_fullscreen_windows_raw_input_and_support_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_mod_no_getwch = ModuleType("msvcrt")
+    monkeypatch.setitem(fs.sys.modules, "msvcrt", fake_mod_no_getwch)
+    assert fs._read_key_windows() == "noop"
+
+    def _set_windows_chars(chars: list[str]) -> None:
+        fake_mod = ModuleType("msvcrt")
+        data = list(chars)
+        fake_mod.getwch = lambda: data.pop(0)  # type: ignore[attr-defined]
+        monkeypatch.setitem(fs.sys.modules, "msvcrt", fake_mod)
+
+    _set_windows_chars(["q"])
+    assert fs._read_key_windows() == "quit"
+    _set_windows_chars(["\t"])
+    assert fs._read_key_windows() == "tab"
+    _set_windows_chars(["["])
+    assert fs._read_key_windows() == "prev_tab"
+    _set_windows_chars(["]"])
+    assert fs._read_key_windows() == "next_tab"
+    _set_windows_chars(["h"])
+    assert fs._read_key_windows() == "left"
+    _set_windows_chars(["j"])
+    assert fs._read_key_windows() == "down"
+    _set_windows_chars(["k"])
+    assert fs._read_key_windows() == "up"
+    _set_windows_chars(["l"])
+    assert fs._read_key_windows() == "right"
+    _set_windows_chars(["\xe0", "I"])
+    assert fs._read_key_windows() == "pageup"
+    _set_windows_chars(["\xe0", "Q"])
+    assert fs._read_key_windows() == "pagedown"
+    _set_windows_chars(["\xe0", "G"])
+    assert fs._read_key_windows() == "home"
+    _set_windows_chars(["\xe0", "O"])
+    assert fs._read_key_windows() == "end"
+    _set_windows_chars(["\xe0", "X"])
+    assert fs._read_key_windows() == "noop"
+    _set_windows_chars(["x"])
+    assert fs._read_key_windows() == "noop"
+
+    monkeypatch.setattr(fs.os, "name", "nt", raising=False)
+    raw = fs._RawInput()
+    with raw:
+        monkeypatch.setattr(fs, "_read_key_windows", lambda: "left")
+        assert raw.read_key() == "left"
+
+    calls: dict[str, int] = {"setcbreak": 0, "tcsetattr": 0}
+    tty_mod = ModuleType("tty")
+    tty_mod.setcbreak = lambda _fd: calls.__setitem__("setcbreak", calls["setcbreak"] + 1)  # type: ignore[attr-defined]
+    termios_mod = ModuleType("termios")
+    termios_mod.TCSADRAIN = 1  # type: ignore[attr-defined]
+    termios_mod.tcgetattr = lambda _fd: "old"  # type: ignore[attr-defined]
+    termios_mod.tcsetattr = lambda _fd, _when, _old: calls.__setitem__(  # type: ignore[attr-defined]
+        "tcsetattr", calls["tcsetattr"] + 1
+    )
+    monkeypatch.setitem(fs.sys.modules, "tty", tty_mod)
+    monkeypatch.setitem(fs.sys.modules, "termios", termios_mod)
+    monkeypatch.setattr(fs.os, "name", "posix", raising=False)
+    monkeypatch.setattr(fs.sys, "stdin", SimpleNamespace(fileno=lambda: 9, read=lambda: ""))
+
+    raw = fs._RawInput()
+    raw.__enter__()
+    monkeypatch.setattr(fs, "_read_key_posix", lambda _fd: "right")
+    assert raw.read_key() == "right"
+    raw.__exit__(None, None, None)
+    assert calls["setcbreak"] == 1
+    assert calls["tcsetattr"] == 1
+
+    raw = fs._RawInput()
+    assert raw.read_key() == "noop"
+    raw.__exit__(None, None, None)
+
+    good_inout = SimpleNamespace(
+        isatty=lambda: True,
+        fileno=lambda: 0,
+        read=lambda: "",
+    )
+    monkeypatch.setattr(fs.sys, "stdin", good_inout)
+    monkeypatch.setattr(fs.sys, "stdout", good_inout)
+    assert fs._supports_tui(cast(Console, _FakeConsole())) is True
+
+    monkeypatch.setattr(fs.sys, "stdin", _FakeInOut(is_tty=False))
+    assert fs._supports_tui(cast(Console, _FakeConsole())) is False
+
+    monkeypatch.setattr(fs.sys, "stdin", _FakeInOut(is_tty=True))
+    monkeypatch.setattr(fs.sys, "stdout", _FakeInOut(is_tty=True))
+    assert fs._supports_tui(cast(Console, object())) is False
+
+    monkeypatch.setattr(
+        fs.sys,
+        "stdin",
+        SimpleNamespace(isatty=lambda: True, fileno=lambda: 0),
+    )
+    assert fs._supports_tui(cast(Console, _FakeConsole())) is False
+
+    monkeypatch.setattr(
+        fs.sys,
+        "stdin",
+        SimpleNamespace(
+            isatty=lambda: True,
+            read=lambda: "",
+            fileno=lambda: (_ for _ in ()).throw(ValueError("x")),
+        ),
+    )
+    assert fs._supports_tui(cast(Console, _FakeConsole())) is False
+
+
+def test_fullscreen_apply_key_panels_and_tui_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    ranges = [
+        SupportRange(
+            range_text=f"{idx}",
+            status="y",
+            is_past=True,
+            is_current=False,
+            is_future=False,
+            title_attr="Global usage: 1.00%",
+            raw_classes=("#1",),
+        )
+        for idx in range(1, 8)
+    ]
+    feature = FeatureFull(
+        slug="feat",
+        title="Feature",
+        spec_url=None,
+        spec_status=None,
+        usage_supported=None,
+        usage_partial=None,
+        usage_total=None,
+        description_text="",
+        browser_blocks=[
+            BrowserSupportBlock(browser_name="A", browser_key="a", ranges=ranges),
+            BrowserSupportBlock(browser_name="B", browser_key="b", ranges=ranges[:2]),
+        ],
+        parse_warnings=[],
+        notes_text=None,
+        resources=[],
+        subfeatures=[],
+        tabs={"Notes": "\n".join([f"line {idx}" for idx in range(12)])},
+    )
+    state = fs._TuiState(selected_browser=0, range_scroll=2, tab_index=0, tab_scroll=6)
+    assert fs._apply_key("quit", state, feature) is False
+
+    state = fs._TuiState(selected_browser=1, range_scroll=3, tab_index=0, tab_scroll=2)
+    assert fs._apply_key("left", state, feature) is True
+    assert state.selected_browser == 0
+    assert state.range_scroll == 0
+
+    assert fs._apply_key("right", state, feature) is True
+    assert state.selected_browser == 1
+    assert state.range_scroll == 0
+
+    state.range_scroll = 1
+    fs._apply_key("up", state, feature)
+    assert state.range_scroll == 0
+    fs._apply_key("down", state, feature)
+    assert state.range_scroll == 1
+
+    state.tab_index = 0
+    state.tab_scroll = 4
+    fs._apply_key("tab", state, feature)
+    assert state.tab_index == 1
+    assert state.tab_scroll == 0
+    fs._apply_key("next_tab", state, feature)
+    assert state.tab_index == 2
+    fs._apply_key("shift_tab", state, feature)
+    assert state.tab_index == 1
+    fs._apply_key("prev_tab", state, feature)
+    assert state.tab_index == 0
+
+    state.tab_index = 1
+    state.tab_scroll = 8
+    fs._apply_key("pageup", state, feature)
+    assert state.tab_scroll == 3
+    fs._apply_key("pagedown", state, feature)
+    assert state.tab_scroll == 8
+
+    state.range_scroll = 3
+    state.tab_scroll = 5
+    fs._apply_key("home", state, feature)
+    assert state.range_scroll == 0
+    assert state.tab_scroll == 0
+    fs._apply_key("end", state, feature)
+    assert state.range_scroll == 1
+    assert state.tab_scroll > 0
+
+    empty = FeatureFull(
+        slug="empty",
+        title="Empty",
+        spec_url=None,
+        spec_status=None,
+        usage_supported=None,
+        usage_partial=None,
+        usage_total=None,
+        description_text="",
+        browser_blocks=[],
+        parse_warnings=[],
+        notes_text=None,
+        resources=[],
+        subfeatures=[],
+        tabs={},
+    )
+    state = fs._TuiState(selected_browser=2, range_scroll=5, tab_index=0, tab_scroll=0)
+    assert fs._apply_key("left", state, empty) is True
+    assert state.selected_browser == 2
+    assert fs._era_label(_sample_support_range(is_current=False, is_future=False)) == "past"
+    assert fs._tab_sections(empty)[0][1] == ["No additional feature metadata."]
+
+    no_browser_text = Console(record=True, width=100, file=io.StringIO())
+    no_browser_text.print(fs._support_overview_panel(empty, fs._TuiState(), width=40, max_rows=6))
+    no_browser_text.print(fs._support_detail_panel(empty, fs._TuiState(), max_rows=6))
+    rendered_empty = no_browser_text.export_text()
+    assert "No browser support blocks found." in rendered_empty
+    assert "No browser selected." in rendered_empty
+
+    empty_ranges_feature = FeatureFull(
+        slug="empty-ranges",
+        title="Empty ranges",
+        spec_url=None,
+        spec_status=None,
+        usage_supported=None,
+        usage_partial=None,
+        usage_total=None,
+        description_text="",
+        browser_blocks=[BrowserSupportBlock(browser_name="A", browser_key="a", ranges=[])],
+        parse_warnings=[],
+        notes_text=None,
+        resources=[],
+        subfeatures=[],
+        tabs={},
+    )
+    empty_ranges_text = Console(record=True, width=100, file=io.StringIO())
+    empty_ranges_text.print(
+        fs._support_overview_panel(empty_ranges_feature, fs._TuiState(), width=24, max_rows=6)
+    )
+    empty_ranges_text.print(
+        fs._support_detail_panel(empty_ranges_feature, fs._TuiState(), max_rows=6)
+    )
+    rendered_empty_ranges = empty_ranges_text.export_text()
+    assert "No range data" in rendered_empty_ranges
+    assert "No support ranges." in rendered_empty_ranges
+
+    full_text = Console(record=True, width=100, file=io.StringIO())
+    full_text.print(fs._support_overview_panel(feature, fs._TuiState(), width=24, max_rows=5))
+    full_text.print(fs._feature_heading_panel(feature, width=60))
+    rendered_full = full_text.export_text()
+    assert "more" in rendered_full
+    assert "Unavailable" in rendered_full
+    assert "No description available." in rendered_full
+
+    snapshots: list[int] = []
+
+    def _fake_build_layout(
+        _feature: FeatureFull,
+        state_arg: fs._TuiState,
+        _console: object,
+    ) -> Text:
+        snapshots.append(state_arg.selected_browser)
+        return Text("layout")
+
+    class _FakeRawInput:
+        def __enter__(self) -> _FakeRawInput:
+            self._keys = iter(["right", "quit"])
+            return self
+
+        def __exit__(
+            self,
+            _exc_type: type[BaseException] | None,
+            _exc: BaseException | None,
+            _tb: object | None,
+        ) -> None:
+            return None
+
+        def read_key(self) -> str:
+            return next(self._keys)
+
+    class _FakeLive:
+        def __enter__(self) -> _FakeLive:
+            return self
+
+        def __exit__(
+            self,
+            _exc_type: type[BaseException] | None,
+            _exc: BaseException | None,
+            _tb: object | None,
+        ) -> None:
+            return None
+
+        def update(self, _layout: object, *, refresh: bool = False) -> None:
+            _ = refresh
+
+    monkeypatch.setattr(fs, "_build_layout", _fake_build_layout)
+    monkeypatch.setattr(fs, "_RawInput", _FakeRawInput)
+    monkeypatch.setattr(fs, "Live", lambda *_args, **_kwargs: _FakeLive())
+    fs._run_tui(cast(Console, _FakeConsole(width=80, height=24)), feature)
+    assert 1 in snapshots
