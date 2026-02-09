@@ -400,6 +400,52 @@ def test_fullscreen_non_tty_preserves_literal_brackets(monkeypatch: pytest.Monke
     assert "[older version](https://example.com/old)" in rendered
 
 
+def test_fullscreen_linkify_produces_clickable_spans() -> None:
+    linked = fs._linkify_line(
+        "Docs: [older version](https://example.com/old) and https://example.com/new"
+    )
+    link_styles = [str(span.style) for span in linked.spans if "link " in str(span.style)]
+    assert any("https://example.com/old" in style for style in link_styles)
+    assert any("https://example.com/new" in style for style in link_styles)
+
+    heading = fs._feature_heading_panel(_sample_feature_full(), width=80)
+    heading_lines = list(getattr(heading.renderable, "renderables", []))
+    spec_line = heading_lines[1]
+    heading_link_styles = [
+        str(span.style) for span in spec_line.spans if "link " in str(span.style)
+    ]
+    assert any("https://example.com/spec" in style for style in heading_link_styles)
+
+    feature = _sample_feature_full()
+    feature = FeatureFull(
+        slug=feature.slug,
+        title=feature.title,
+        spec_url=feature.spec_url,
+        spec_status=feature.spec_status,
+        usage_supported=feature.usage_supported,
+        usage_partial=feature.usage_partial,
+        usage_total=feature.usage_total,
+        description_text=feature.description_text,
+        browser_blocks=feature.browser_blocks,
+        parse_warnings=feature.parse_warnings,
+        notes_text=feature.notes_text,
+        resources=feature.resources,
+        subfeatures=feature.subfeatures,
+        tabs={"Notes": "[old](https://example.com/old)\nhttps://example.com/new"},
+    )
+    state = fs._TuiState(tab_index=1)
+    tab_panel = fs._tab_panel(feature, state, max_rows=10)
+    payload_lines = list(getattr(tab_panel.renderable, "renderables", []))
+    payload_link_styles = [
+        str(span.style)
+        for line in payload_lines
+        for span in getattr(line, "spans", [])
+        if "link " in str(span.style)
+    ]
+    assert any("https://example.com/old" in style for style in payload_link_styles)
+    assert any("https://example.com/new" in style for style in payload_link_styles)
+
+
 def test_fullscreen_tab_sections_prefer_parsed_tabs_order() -> None:
     feature = _sample_feature_full()
     sections = fs._tab_sections(feature)
@@ -462,8 +508,7 @@ def test_fullscreen_layout_has_expected_sections_without_removed_header() -> Non
     layout = fs._build_layout(feature, state, console)
     root_names = [child.name for child in layout.children]
     assert root_names == ["feature", "support", "details", "footer"]
-    detail_names = [child.name for child in layout["details"].children]
-    assert detail_names == ["browser", "tabs"]
+    assert layout["details"].children == []
 
     console.print(layout)
     rendered = console.export_text()
@@ -561,7 +606,9 @@ def test_select_low_level_key_and_window_helpers(monkeypatch: pytest.MonkeyPatch
     assert ui_select._visible_window(selected_idx=9, total=20, height=10) == (7, 11)
     assert ui_select._decode_escape_sequence(b"[A") == "up"
     assert ui_select._decode_escape_sequence(b"[B") == "down"
-    assert ui_select._decode_escape_sequence(b"[C") == "quit"
+    assert ui_select._decode_escape_sequence(b"[C") == "noop"
+    assert ui_select._decode_escape_sequence(b"OA") == "up"
+    assert ui_select._decode_escape_sequence(b"OB") == "down"
 
     monkeypatch.setattr(ui_select.os, "read", lambda _fd, _n: b"")
     assert ui_select._read_key_posix(0) == "noop"
@@ -589,7 +636,7 @@ def test_select_low_level_key_and_window_helpers(monkeypatch: pytest.MonkeyPatch
     )
     monkeypatch.setattr(ui_select.os, "read", lambda _fd, _n: next(chunks_unknown))
     monkeypatch.setattr(ui_select.select, "select", lambda *_args, **_kwargs: next(ready))
-    assert ui_select._read_key_posix(0) == "quit"
+    assert ui_select._read_key_posix(0) == "noop"
 
 
 def test_select_windows_raw_input_and_support_paths(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -742,7 +789,10 @@ def test_fullscreen_low_level_key_helpers(monkeypatch: pytest.MonkeyPatch) -> No
     assert fs._decode_escape_sequence(b"[H") == "home"
     assert fs._decode_escape_sequence(b"[F") == "end"
     assert fs._decode_escape_sequence(b"[Z") == "shift_tab"
-    assert fs._decode_escape_sequence(b"[X") == "quit"
+    assert fs._decode_escape_sequence(b"[X") == "noop"
+    assert fs._decode_escape_sequence(b"OC") == "right"
+    assert fs._decode_escape_sequence(b"[5;5~") == "pageup"
+    assert fs._decode_escape_sequence(b"[6;2~") == "pagedown"
 
     monkeypatch.setattr(fs.os, "read", lambda _fd, _n: b"")
     assert fs._read_key_posix(0) == "noop"
@@ -779,7 +829,7 @@ def test_fullscreen_low_level_key_helpers(monkeypatch: pytest.MonkeyPatch) -> No
     )
     monkeypatch.setattr(fs.os, "read", lambda _fd, _n: next(chunks_unknown))
     monkeypatch.setattr(fs.select, "select", lambda *_args, **_kwargs: next(ready))
-    assert fs._read_key_posix(0) == "quit"
+    assert fs._read_key_posix(0) == "noop"
 
 
 def test_fullscreen_windows_raw_input_and_support_paths(
@@ -956,8 +1006,10 @@ def test_fullscreen_apply_key_panels_and_tui_loop(monkeypatch: pytest.MonkeyPatc
     state.tab_index = 1
     state.tab_scroll = 8
     fs._apply_key("pageup", state, feature)
+    assert state.selected_browser == 0
     assert state.tab_scroll == 3
     fs._apply_key("pagedown", state, feature)
+    assert state.selected_browser == 1
     assert state.tab_scroll == 8
 
     state.range_scroll = 3
@@ -968,6 +1020,12 @@ def test_fullscreen_apply_key_panels_and_tui_loop(monkeypatch: pytest.MonkeyPatc
     fs._apply_key("end", state, feature)
     assert state.range_scroll == 1
     assert state.tab_scroll > 0
+
+    state = fs._TuiState(selected_browser=0, browser_visible_count=3, tab_index=1, tab_scroll=0)
+    fs._apply_key("pagedown", state, feature)
+    assert state.selected_browser == 1
+    fs._apply_key("pageup", state, feature)
+    assert state.selected_browser == 0
 
     empty = FeatureFull(
         slug="empty",

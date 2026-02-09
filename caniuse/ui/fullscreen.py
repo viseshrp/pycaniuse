@@ -11,7 +11,6 @@ import sys
 import textwrap
 from typing import Any, Literal, cast
 
-from rich.columns import Columns
 from rich.console import Console, Group
 from rich.layout import Layout
 from rich.live import Live
@@ -22,7 +21,7 @@ from ..constants import STATUS_ICON_MAP, STATUS_LABEL_MAP
 from ..model import BrowserSupportBlock, FeatureFull, SupportRange
 from ..util.text import extract_note_markers
 
-_CARD_WIDTH = 24
+_BROWSER_TAB_WIDTH = 16
 _KEY = Literal[
     "up",
     "down",
@@ -51,12 +50,14 @@ _ERA_STYLE_MAP = {
     "future": "magenta",
 }
 _GLOBAL_USAGE_RE = re.compile(r"Global usage:\s*([0-9]+(?:\.[0-9]+)?)%")
+_LINK_TOKEN_RE = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)|(https?://[^\s)]+)")
 
 
 @dataclass
 class _TuiState:
     selected_browser: int = 0
     browser_offset: int = 0
+    browser_visible_count: int = 1
     range_scroll: int = 0
     tab_index: int = 0
     tab_scroll: int = 0
@@ -210,6 +211,36 @@ def _extract_global_usage(title_attr: str) -> str | None:
     return f"{match.group(1)}%"
 
 
+def _linkify_line(value: str, *, base_style: str | None = None) -> Text:
+    text = Text()
+    cursor = 0
+    for match in _LINK_TOKEN_RE.finditer(value):
+        start, end = match.span()
+        if start > cursor:
+            text.append(value[cursor:start], style=base_style)
+
+        markdown_label = match.group(1)
+        markdown_url = match.group(2)
+        bare_url = match.group(3)
+        label = markdown_label or bare_url or ""
+        url = markdown_url or bare_url or ""
+        if label and url:
+            style = "underline cyan"
+            if base_style:
+                style = f"{base_style} {style}"
+            text.append(label, style=f"{style} link {url}")
+
+        cursor = end
+
+    if cursor < len(value):
+        text.append(value[cursor:], style=base_style)
+    if not text.plain:
+        if base_style:
+            return Text(value, style=base_style)
+        return Text(value)
+    return text
+
+
 def _format_support_line(support_range: SupportRange, *, include_usage: bool) -> Text:
     icon = STATUS_ICON_MAP.get(support_range.status, STATUS_ICON_MAP["u"])
     status_label = STATUS_LABEL_MAP.get(support_range.status, STATUS_LABEL_MAP["u"])
@@ -249,7 +280,8 @@ def _support_overview_panel(
     feature: FeatureFull, state: _TuiState, width: int, max_rows: int
 ) -> Panel:
     browser_count = len(feature.browser_blocks)
-    visible_count = max(width // _CARD_WIDTH, 1)
+    visible_count = max(width // _BROWSER_TAB_WIDTH, 1)
+    state.browser_visible_count = visible_count
     _fit_browser_window(state, browser_count, visible_count)
     if browser_count == 0:
         return Panel(
@@ -260,33 +292,48 @@ def _support_overview_panel(
 
     start = state.browser_offset
     stop = min(start + visible_count, browser_count)
-    cards: list[Panel] = []
+    selected = feature.browser_blocks[state.selected_browser]
+
+    labels: list[Text] = []
     for index in range(start, stop):
         block = feature.browser_blocks[index]
-        is_selected = index == state.selected_browser
-        preview_size = max(max_rows - 2, 2) if is_selected else max(max_rows - 4, 2)
-        content: list[Text] = []
-        for support_range in block.ranges[:preview_size]:
-            content.append(_format_support_line(support_range, include_usage=False))
-        if len(block.ranges) > preview_size:
-            content.append(Text(f"... {len(block.ranges) - preview_size} more", style="dim"))
-        if not content:
-            content = [Text("No range data", style="dim")]
-        cards.append(
-            Panel(
-                Group(*content),
-                title=block.browser_name,
-                border_style="bright_cyan" if is_selected else "grey50",
-            )
-        )
+        tab_style = "bold white on blue" if index == state.selected_browser else "dim"
+        labels.append(Text(f" {block.browser_name} ", style=tab_style))
 
-    footer = Text(f"Showing browsers {start + 1}-{stop} of {browser_count}", style="dim")
+    tabs_bar = Text()
+    if start > 0:
+        tabs_bar.append("< ", style="dim")
+    tabs_bar.append_text(Text.assemble(*labels))
+    if stop < browser_count:
+        tabs_bar.append(" >", style="dim")
+
+    range_count = len(selected.ranges)
+    if range_count:
+        state.range_scroll = max(0, min(state.range_scroll, range_count - 1))
+    else:
+        state.range_scroll = 0
+
+    preview_size = max(max_rows - 5, 2)
+    visible_ranges = selected.ranges[state.range_scroll : state.range_scroll + preview_size]
+    rows: list[Text] = []
+    for support_range in visible_ranges:
+        rows.append(_format_support_line(support_range, include_usage=False))
+    if range_count > state.range_scroll + preview_size:
+        remaining = range_count - (state.range_scroll + preview_size)
+        rows.append(Text(f"... {remaining} more", style="dim"))
+    if not rows:
+        rows = [Text("No range data", style="dim")]
+
+    row_start = state.range_scroll + 1 if visible_ranges else 0
+    row_end = state.range_scroll + len(visible_ranges) if visible_ranges else 0
+    footer = Text(
+        f"Browser {state.selected_browser + 1}/{browser_count} ({selected.browser_name})  "
+        f"rows {row_start}-{row_end}"
+        f" of {range_count}",
+        style="dim",
+    )
     return Panel(
-        Group(
-            Columns(cards, equal=True, expand=True),
-            Text(""),
-            footer,
-        ),
+        Group(tabs_bar, Text(""), *rows, Text(""), footer),
         title="Support Table",
         border_style="green",
     )
@@ -340,7 +387,7 @@ def _tab_panel(feature: FeatureFull, state: _TuiState, max_rows: int) -> Panel:
 
     visible_count = max(max_rows - 4, 4)
     visible_lines = tab_lines[state.tab_scroll : state.tab_scroll + visible_count]
-    payload = [Text(line) for line in visible_lines] or [Text("No content", style="dim")]
+    payload = [_linkify_line(line) for line in visible_lines] or [Text("No content", style="dim")]
     payload.extend(
         [
             Text(""),
@@ -392,7 +439,7 @@ def _feature_heading_panel(feature: FeatureFull, width: int) -> Panel:
 
     body: list[Text] = [title_line]
     if feature.spec_url:
-        body.append(Text(feature.spec_url, style="cyan"))
+        body.append(_linkify_line(feature.spec_url, base_style="cyan"))
     body.extend([Text(""), usage_line, Text(""), Text(description)])
     return Panel(Group(*body), border_style="white")
 
@@ -409,8 +456,8 @@ def _footer_panel() -> Panel:
     legend.append(f" {STATUS_ICON_MAP['u']} Unknown ", style=_STATUS_STYLE_MAP["u"])
 
     controls = Text(
-        "←/→ select browser  ↑/↓ scroll browser  Tab/[/] switch section  "
-        "PgUp/PgDn scroll section  q/Esc quit",
+        "←/→ select browser  ↑/↓ scroll browser  PgUp/PgDn page browsers + scroll section  "
+        "Tab/[/] switch section  q/Esc quit",
         style="dim",
     )
     return Panel(Group(controls, legend), border_style="grey50")
@@ -433,32 +480,35 @@ def _build_layout(feature: FeatureFull, state: _TuiState, console: Console) -> L
         Layout(name="details", size=details_size),
         Layout(name="footer", size=footer_size),
     )
-    root["details"].split_row(
-        Layout(name="browser"),
-        Layout(name="tabs"),
-    )
 
     root["feature"].update(_feature_heading_panel(feature, size.width))
     root["support"].update(_support_overview_panel(feature, state, size.width - 6, support_rows))
-    root["browser"].update(_support_detail_panel(feature, state, details_rows))
-    root["tabs"].update(_tab_panel(feature, state, details_rows))
+    root["details"].update(_tab_panel(feature, state, details_rows))
     root["footer"].update(_footer_panel())
     return root
 
 
 def _decode_escape_sequence(sequence: bytes) -> _KEY:
-    mapping: dict[bytes, _KEY] = {
-        b"[A": "up",
-        b"[B": "down",
-        b"[C": "right",
-        b"[D": "left",
-        b"[5~": "pageup",
-        b"[6~": "pagedown",
-        b"[H": "home",
-        b"[F": "end",
-        b"[Z": "shift_tab",
-    }
-    return mapping.get(sequence, "quit")
+    normalized = sequence.replace(b"O", b"[")
+    if normalized.endswith(b"A"):
+        return "up"
+    if normalized.endswith(b"B"):
+        return "down"
+    if normalized.endswith(b"C"):
+        return "right"
+    if normalized.endswith(b"D"):
+        return "left"
+    if normalized.startswith(b"[5") and normalized.endswith(b"~"):
+        return "pageup"
+    if normalized.startswith(b"[6") and normalized.endswith(b"~"):
+        return "pagedown"
+    if normalized.endswith(b"H"):
+        return "home"
+    if normalized.endswith(b"F"):
+        return "end"
+    if normalized.endswith(b"Z"):
+        return "shift_tab"
+    return "noop"
 
 
 def _read_key_posix(fd: int) -> _KEY:
@@ -481,6 +531,8 @@ def _read_key_posix(fd: int) -> _KEY:
             sequence += os.read(fd, 1)
             if sequence.endswith((b"A", b"B", b"C", b"D", b"~", b"Z", b"H", b"F")):
                 break
+        if not sequence:
+            return "quit"
         return _decode_escape_sequence(sequence)
     if char.lower() == "h":
         return "left"
@@ -610,8 +662,16 @@ def _apply_key(key: _KEY, state: _TuiState, feature: FeatureFull) -> bool:
         state.tab_index = (state.tab_index - 1) % section_count
         state.tab_scroll = 0
     elif key == "pageup":
+        if browser_count:
+            step = max(state.browser_visible_count, 1)
+            state.selected_browser = max(state.selected_browser - step, 0)
+            state.range_scroll = 0
         state.tab_scroll = max(state.tab_scroll - 5, 0)
     elif key == "pagedown":
+        if browser_count:
+            step = max(state.browser_visible_count, 1)
+            state.selected_browser = min(state.selected_browser + step, browser_count - 1)
+            state.range_scroll = 0
         active_lines = _tab_sections(feature)[state.tab_index][1]
         state.tab_scroll = min(state.tab_scroll + 5, max(len(active_lines) - 1, 0))
     elif key == "home":

@@ -37,7 +37,10 @@ def render_basic(feature: FeatureBasic) -> Group:
 
     if feature.spec_url:
         spec_tail = f" [{feature.spec_status}]" if feature.spec_status else ""
-        lines.append(Text(f"Spec: {feature.spec_url}{spec_tail}"))
+        spec_line = Text("Spec: ")
+        spec_line.append(feature.spec_url, style=f"cyan link {feature.spec_url}")
+        spec_line.append(spec_tail)
+        lines.append(spec_line)
 
     usage_line = _usage_line(feature)
     if usage_line:

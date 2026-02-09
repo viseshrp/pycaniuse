@@ -48,11 +48,12 @@ def _visible_window(selected_idx: int, total: int, height: int) -> tuple[int, in
 
 
 def _decode_escape_sequence(sequence: bytes) -> _KEY:
-    mapping: dict[bytes, _KEY] = {
-        b"[A": "up",
-        b"[B": "down",
-    }
-    return mapping.get(sequence, "quit")
+    normalized = sequence.replace(b"O", b"[")
+    if normalized.endswith(b"A"):
+        return "up"
+    if normalized.endswith(b"B"):
+        return "down"
+    return "noop"
 
 
 def _read_key_posix(fd: int) -> _KEY:
@@ -71,6 +72,8 @@ def _read_key_posix(fd: int) -> _KEY:
             sequence += os.read(fd, 1)
             if sequence.endswith((b"A", b"B")):
                 break
+        if not sequence:
+            return "quit"
         return _decode_escape_sequence(sequence)
     if char.lower() == "k":
         return "up"

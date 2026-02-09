@@ -154,6 +154,14 @@ def test_render_basic_and_usage_branches() -> None:
     console.print(rendered)
     output = console.export_text()
 
+    outer_renderables = list(getattr(rendered, "renderables", []))
+    assert outer_renderables
+    panel = outer_renderables[0]
+    body_lines = list(getattr(getattr(panel, "renderable", None), "renderables", []))
+    spec_line = body_lines[1]
+    link_spans = [span for span in getattr(spec_line, "spans", []) if "link " in str(span.style)]
+    assert any("https://www.w3.org/TR/css3-flexbox/" in str(span.style) for span in link_spans)
+
     assert "Flexbox" in output
     assert "Spec:" in output
     assert "Usage:" in output
