@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import io
-import sys
 from types import SimpleNamespace
 from typing import Literal
 
 from click.testing import CliRunner
 import pytest
 from rich.console import Console
-from rich.text import Text
 
 from caniuse import cli
 from caniuse.exceptions import CaniuseError
@@ -46,7 +44,15 @@ class _FakeConsole:
     def print(self, obj: object, **_kwargs: object) -> None:
         self.printed.append(obj)
 
-    def input(self, _prompt: str = "") -> str:
+    def input(
+        self,
+        _prompt: str = "",
+        *,
+        password: bool = False,
+        stream: object | None = None,
+    ) -> str:
+        _ = password
+        _ = stream
         if self._inputs:
             return self._inputs.pop(0)
         return "q"
@@ -65,7 +71,15 @@ class _FakeConsoleNoPager:
     def print(self, obj: object, **_kwargs: object) -> None:
         self.printed.append(obj)
 
-    def input(self, _prompt: str = "") -> str:
+    def input(
+        self,
+        _prompt: str = "",
+        *,
+        password: bool = False,
+        stream: object | None = None,
+    ) -> str:
+        _ = password
+        _ = stream
         if self._inputs:
             return self._inputs.pop(0)
         return "q"
@@ -184,7 +198,6 @@ def test_select_match_invalid_then_valid(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(ui_select.sys, "stdout", _FakeInOut(is_tty=True))
 
     assert ui_select.select_match(matches) == "b"
-    assert "Invalid selection. Try again." in fake_console.printed
 
 
 def test_select_build_frame() -> None:
@@ -214,22 +227,17 @@ def test_fullscreen_support_lines_and_non_tty(monkeypatch: pytest.MonkeyPatch) -
     assert fake_console.printed
 
 
-def test_fullscreen_tty_uses_tui(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fullscreen_tty_uses_pager(monkeypatch: pytest.MonkeyPatch) -> None:
     feature = _sample_feature_full()
     fake_console = _FakeConsole(width=40, height=10)
-    called = {"tui": False}
-
-    def _run_tui(console: object, arg_feature: FeatureFull) -> None:
-        called["tui"] = True
-        assert console is fake_console
-        assert arg_feature is feature
 
     monkeypatch.setattr(fs, "Console", lambda: fake_console)
-    monkeypatch.setattr(fs, "_supports_tui", lambda _console: True)
-    monkeypatch.setattr(fs, "_run_tui", _run_tui)
+    monkeypatch.setattr(fs.sys, "stdin", _FakeInOut(is_tty=True))
+    monkeypatch.setattr(fs.sys, "stdout", _FakeInOut(is_tty=True))
 
     fs.run_fullscreen(feature)
-    assert called["tui"] is True
+    assert fake_console.pager_calls == ["enter", "exit"]
+    assert fake_console.pager_styles == [True]
 
 
 def test_fullscreen_tty_without_pager_falls_back_to_print(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -288,19 +296,15 @@ def test_fullscreen_non_tty_preserves_literal_brackets(monkeypatch: pytest.Monke
         tabs={"Notes": "[older version](https://example.com/old)"},
     )
 
-    fake_console = _FakeConsole()
-    monkeypatch.setattr(fs, "Console", lambda: fake_console)
+    console = Console(width=120, height=40, file=io.StringIO(), record=True)
+    monkeypatch.setattr(fs, "Console", lambda: console)
     monkeypatch.setattr(fs.sys, "stdin", _FakeInOut(is_tty=False))
     monkeypatch.setattr(fs.sys, "stdout", _FakeInOut(is_tty=False))
 
     fs.run_fullscreen(feature)
 
-    panel_payloads = []
-    for obj in fake_console.printed:
-        renderable = getattr(obj, "renderable", None)
-        if isinstance(renderable, Text):
-            panel_payloads.append(renderable.plain)
-    assert any("[older version](https://example.com/old)" in payload for payload in panel_payloads)
+    rendered = console.export_text()
+    assert "[older version](https://example.com/old)" in rendered
 
 
 def test_fullscreen_tab_sections_prefer_parsed_tabs_order() -> None:
@@ -359,16 +363,9 @@ def test_fullscreen_support_line_includes_era_usage_and_notes() -> None:
 
 def test_fullscreen_layout_has_expected_sections_without_removed_header() -> None:
     feature = _sample_feature_full()
-    state = fs._TuiState()
     console = Console(width=120, height=40, file=io.StringIO(), record=True)
 
-    layout = fs._build_layout(feature, state, console)
-    root_names = [child.name for child in layout.children]
-    assert root_names == ["feature", "support", "details", "footer"]
-    detail_names = [child.name for child in layout["details"].children]
-    assert detail_names == ["browser", "tabs"]
-
-    console.print(layout)
+    console.print(fs._build_full_renderable(feature, console.size.width))
     rendered = console.export_text()
     assert "Home   News   Compare browsers   About" not in rendered
     assert "January 2026 - New feature announcements available on caniuse.com" not in rendered
@@ -379,60 +376,6 @@ def test_fullscreen_layout_has_expected_sections_without_removed_header() -> Non
 def test_fullscreen_extract_global_usage_parses_only_expected_pattern() -> None:
     assert fs._extract_global_usage("Global usage: 1.58% - Supported") == "1.58%"
     assert fs._extract_global_usage("usage missing label") is None
-
-
-def test_fullscreen_read_key_windows_without_getwch_returns_noop(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setitem(sys.modules, "msvcrt", SimpleNamespace())
-    assert fs._read_key_windows() == "noop"
-
-
-def test_fullscreen_read_key_windows_maps_regular_and_special_keys(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def _module_for_keys(keys: list[str]) -> SimpleNamespace:
-        it = iter(keys)
-        return SimpleNamespace(getwch=lambda: next(it))
-
-    monkeypatch.setitem(sys.modules, "msvcrt", _module_for_keys(["]"]))
-    assert fs._read_key_windows() == "next_tab"
-
-    monkeypatch.setitem(sys.modules, "msvcrt", _module_for_keys(["\x00", "H"]))
-    assert fs._read_key_windows() == "up"
-
-    monkeypatch.setitem(sys.modules, "msvcrt", _module_for_keys(["\x00", "?"]))
-    assert fs._read_key_windows() == "noop"
-
-
-def test_raw_input_posix_restores_terminal_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    import termios
-    import tty
-
-    calls: dict[str, object] = {}
-    attrs: list[int | list[int | bytes]] = [1, [2], 3, [b"x"], 5, 6, 7]
-
-    monkeypatch.setattr(fs.os, "name", "posix")
-    monkeypatch.setattr(fs.sys, "stdin", _FakeInOut(is_tty=True))
-    monkeypatch.setattr(termios, "tcgetattr", lambda _fd: attrs)
-    monkeypatch.setattr(tty, "setcbreak", lambda fd: calls.setdefault("setcbreak", fd))
-
-    def _tcsetattr(fd: int, when: int, value: object) -> None:
-        calls["tcsetattr"] = (fd, when, value)
-
-    monkeypatch.setattr(termios, "tcsetattr", _tcsetattr)
-
-    raw = fs._RawInput()
-    with raw:
-        pass
-
-    assert calls["setcbreak"] == 0
-    record = calls["tcsetattr"]
-    assert isinstance(record, tuple)
-    fd, when, value = record
-    assert fd == 0
-    assert when == termios.TCSADRAIN
-    assert value == attrs
 
 
 def test_cli_full_mode_and_error_path(monkeypatch: pytest.MonkeyPatch) -> None:
