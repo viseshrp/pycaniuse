@@ -367,9 +367,12 @@ def test_fullscreen_layout_has_expected_sections_without_removed_header() -> Non
 
     console.print(fs._build_full_renderable(feature, console.size.width))
     rendered = console.export_text()
-    assert "Home   News   Compare browsers   About" not in rendered
-    assert "January 2026 - New feature announcements available on caniuse.com" not in rendered
-    assert "Can I use Flexbox ?   Settings" not in rendered
+    assert "Home   News   Compare browsers   About" in rendered
+    assert "January 10, 2026 - New feature: CSS Grid Lanes" in rendered
+    assert "Can I use" in rendered
+    assert "Settings" in rendered
+    assert "Support" in rendered
+    assert "Additional Information" in rendered
     assert "Flexbox" in rendered
 
 

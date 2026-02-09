@@ -1,4 +1,4 @@
-"""Full-mode renderer powered by Rich primitives only."""
+"""Full-mode renderer styled to resemble caniuse.com using Rich only."""
 
 from __future__ import annotations
 
@@ -6,13 +6,14 @@ import re
 import sys
 import textwrap
 
-from rich.console import Console, Group
+from rich.columns import Columns
+from rich.console import Console, Group, RenderableType
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
 from ..constants import STATUS_ICON_MAP, STATUS_LABEL_MAP
-from ..model import FeatureFull, SupportRange
+from ..model import BrowserSupportBlock, FeatureFull, SupportRange
 from ..util.text import extract_note_markers
 
 _STATUS_STYLE_MAP = {
@@ -27,6 +28,8 @@ _ERA_STYLE_MAP = {
     "future": "magenta",
 }
 _GLOBAL_USAGE_RE = re.compile(r"Global usage:\s*([0-9]+(?:\.[0-9]+)?)%")
+_TITLE_DETAILS_RE = re.compile(r"Global usage:\s*[0-9]+(?:\.[0-9]+)?%\s*-\s*(.+)")
+_NEWS_BANNER = "January 10, 2026 - New feature: CSS Grid Lanes"
 
 
 def _support_lines(feature: FeatureFull) -> list[str]:
@@ -171,6 +174,15 @@ def _extract_global_usage(title_attr: str) -> str | None:
     return f"{match.group(1)}%"
 
 
+def _extract_title_details(title_attr: str) -> str | None:
+    if not title_attr:
+        return None
+    match = _TITLE_DETAILS_RE.search(title_attr)
+    if not match:
+        return None
+    return match.group(1)
+
+
 def _format_support_line(support_range: SupportRange, *, include_usage: bool) -> Text:
     icon = STATUS_ICON_MAP.get(support_range.status, STATUS_ICON_MAP["u"])
     status_label = STATUS_LABEL_MAP.get(support_range.status, STATUS_LABEL_MAP["u"])
@@ -182,7 +194,7 @@ def _format_support_line(support_range: SupportRange, *, include_usage: bool) ->
 
     line = Text()
     line.append(f" {icon} ", style=status_style)
-    line.append(f" {support_range.range_text} ")
+    line.append(f" {support_range.range_text} ", style="bold")
     line.append(f"[{era}]", style=era_style)
     line.append(f"  {status_label}", style="dim")
     if usage:
@@ -192,85 +204,125 @@ def _format_support_line(support_range: SupportRange, *, include_usage: bool) ->
     return line
 
 
-def _support_table(feature: FeatureFull) -> Table:
-    table = Table(expand=True, show_lines=False)
-    table.add_column("Browser", style="bold")
-    table.add_column("Range", justify="right")
-    table.add_column("Status")
-    table.add_column("Global Usage", justify="right")
-    table.add_column("Notes", style="yellow")
+def _top_nav_panel() -> Panel:
+    nav = Text()
+    nav.append("Home", style="bold cyan")
+    nav.append("   News", style="bold cyan")
+    nav.append("   Compare browsers", style="bold cyan")
+    nav.append("   About", style="bold cyan")
 
-    if not feature.browser_blocks:
-        table.add_row("No browser support blocks found.", "-", "-", "-", "-")
-        return table
+    search = Text()
+    search.append("Can I use ", style="bold")
+    search.append(" Search ", style="black on white")
+    search.append(" ? ", style="bold")
+    search.append(" Settings ", style="black on grey70")
 
-    for block in feature.browser_blocks:
-        if not block.ranges:
-            table.add_row(block.browser_name, "-", "No range data", "-", "-")
-            continue
-
-        for idx, support_range in enumerate(block.ranges):
-            usage = _extract_global_usage(support_range.title_attr) or "-"
-            notes = extract_note_markers(support_range.raw_classes)
-            browser_name = block.browser_name if idx == 0 else ""
-            table.add_row(
-                browser_name,
-                support_range.range_text,
-                _format_support_line(support_range, include_usage=False),
-                usage,
-                ",".join(notes) if notes else "-",
-            )
-    return table
+    news = Text(_NEWS_BANNER, style="yellow")
+    return Panel(Group(nav, Text(""), news, Text(""), search), border_style="grey50")
 
 
-def _feature_heading_panel(feature: FeatureFull, width: int) -> Panel:
-    title_line = Text(feature.title, style="bold")
+def _feature_intro_panel(feature: FeatureFull, width: int) -> Panel:
+    heading = Text(feature.title, style="bold")
     if feature.spec_status:
-        title_line.append("  ")
-        title_line.append(f"- {feature.spec_status}", style="cyan")
+        heading.append("  ")
+        heading.append(f"- {feature.spec_status}", style="cyan")
 
-    usage_line = Text("Global usage: ", style="bold")
-    has_usage = False
+    usage = Text("Global usage ", style="bold")
     if feature.usage_supported is not None:
-        usage_line.append(f" {feature.usage_supported:.2f}% ", style=_STATUS_STYLE_MAP["y"])
-        usage_line.append(" + ", style="dim")
-        has_usage = True
+        usage.append(f" {feature.usage_supported:.2f}% ", style=_STATUS_STYLE_MAP["y"])
     if feature.usage_partial is not None:
-        usage_line.append(f" {feature.usage_partial:.2f}% ", style=_STATUS_STYLE_MAP["a"])
-        has_usage = True
+        usage.append(" + ", style="dim")
+        usage.append(f" {feature.usage_partial:.2f}% ", style=_STATUS_STYLE_MAP["a"])
     if feature.usage_total is not None:
-        usage_line.append(f" = {feature.usage_total:.2f}%", style="bold")
-        has_usage = True
-    if not has_usage:
-        usage_line.append("Unavailable", style="dim")
+        usage.append(" = ", style="dim")
+        usage.append(f"{feature.usage_total:.2f}%", style="bold")
 
-    desc_width = max(width - 8, 30)
-    description_lines = []
-    if feature.description_text:
-        description_lines = textwrap.wrap(feature.description_text, width=desc_width)
+    desc_width = max(width - 12, 35)
+    description = feature.description_text or "No description available."
+    wrapped_desc = textwrap.fill(description, width=desc_width)
 
-    description = "No description available."
-    if description_lines:
-        description = "\n".join(description_lines[:4])
-
-    body: list[Text] = [title_line]
+    payload: list[RenderableType] = [heading]
     if feature.spec_url:
-        body.append(Text(feature.spec_url, style="cyan"))
-    body.extend([Text(""), usage_line, Text(""), Text(description)])
-    return Panel(Group(*body), border_style="white", title=f"/{feature.slug}")
+        payload.append(Text(feature.spec_url, style="cyan"))
+    payload.extend([Text(""), usage, Text(""), Text(wrapped_desc)])
+    return Panel(Group(*payload), title="Feature", border_style="white")
 
 
-def _tab_sections_panel(feature: FeatureFull) -> Panel:
-    sections: list[Text] = []
-    for tab_name, tab_lines in _tab_sections(feature):
-        sections.append(Text(tab_name, style="bold magenta"))
-        for line in tab_lines:
-            sections.append(Text(line))
-        sections.append(Text(""))
-    return Panel(Group(*sections), title="Feature Details", border_style="magenta")
+def _browser_card(block: BrowserSupportBlock) -> Panel:
+    rows: list[RenderableType] = []
+    if not block.ranges:
+        rows.append(Text("No support data", style="dim"))
+        return Panel(Group(*rows), title=block.browser_name, border_style="grey50")
+
+    for support_range in block.ranges:
+        rows.append(_format_support_line(support_range, include_usage=False))
+        usage = _extract_global_usage(support_range.title_attr)
+        details = _extract_title_details(support_range.title_attr)
+        meta = Text()
+        if usage:
+            meta.append(f"  Global usage: {usage}", style="dim")
+        if details:
+            if usage:
+                meta.append(" - ", style="dim")
+            meta.append(details, style="dim")
+        if meta.plain:
+            rows.append(meta)
+    return Panel(Group(*rows), title=block.browser_name, border_style="grey50")
 
 
-def _footer_panel() -> Panel:
+def _support_columns_panel(feature: FeatureFull) -> Panel:
+    if not feature.browser_blocks:
+        return Panel(Text("No browser support blocks found."), title="Support", border_style="red")
+
+    cards = [_browser_card(block) for block in feature.browser_blocks]
+    return Panel(Columns(cards, expand=True), title="Support", border_style="green")
+
+
+def _notes_resources_panel(feature: FeatureFull) -> Panel:
+    rows: list[RenderableType] = []
+
+    if feature.notes_text:
+        rows.append(Text("Notes", style="bold"))
+        rows.append(Text(feature.notes_text))
+        rows.append(Text(""))
+
+    if feature.resources:
+        rows.append(Text("Resources", style="bold"))
+        for label, url in feature.resources:
+            rows.append(Text(f"- {label}: {url}"))
+        rows.append(Text(""))
+
+    if feature.subfeatures:
+        rows.append(Text("Sub-features", style="bold"))
+        for label, url in feature.subfeatures:
+            rows.append(Text(f"- {label}: {url}"))
+        rows.append(Text(""))
+
+    if not rows:
+        rows.append(Text("No notes, resources, or sub-features available.", style="dim"))
+
+    return Panel(Group(*rows), title="Additional Information", border_style="blue")
+
+
+def _site_footer_panel() -> Panel:
+    left = Group(
+        Text("Can I use...", style="bold"),
+        Text("Browser support tables for modern web technologies", style="dim"),
+        Text("Created & maintained by @Fyrd, design by @Lensco.", style="dim"),
+    )
+    right = Group(
+        Text("Site links", style="bold"),
+        Text("Home  |  Feature index  |  Usage table  |  Feature suggestions"),
+        Text("Caniuse data on GitHub", style="cyan"),
+    )
+    grid = Table.grid(expand=True)
+    grid.add_column(ratio=2)
+    grid.add_column(ratio=2)
+    grid.add_row(left, right)
+    return Panel(grid, border_style="grey50")
+
+
+def _legend_panel() -> Panel:
     legend = Text()
     legend.append(" ")
     legend.append(f" {STATUS_ICON_MAP['y']} Supported ", style=_STATUS_STYLE_MAP["y"])
@@ -285,18 +337,22 @@ def _footer_panel() -> Panel:
         "Use pager controls to scroll full output (press q to exit pager).",
         style="dim",
     )
-    return Panel(Group(controls, legend), border_style="grey50")
+    return Panel(Group(controls, legend), title="Legend", border_style="grey50")
 
 
 def _build_full_renderable(feature: FeatureFull, width: int) -> Group:
     return Group(
-        _feature_heading_panel(feature, width),
+        _top_nav_panel(),
         Text(""),
-        Panel(_support_table(feature), title="Support Table", border_style="green"),
+        _feature_intro_panel(feature, width),
         Text(""),
-        _tab_sections_panel(feature),
+        _support_columns_panel(feature),
         Text(""),
-        _footer_panel(),
+        _notes_resources_panel(feature),
+        Text(""),
+        _site_footer_panel(),
+        Text(""),
+        _legend_panel(),
     )
 
 
