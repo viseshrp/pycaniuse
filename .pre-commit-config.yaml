@@ -21,13 +21,13 @@ repos:
 
   - repo: local
     hooks:
-      - id: black
-        name: black
-        entry: black
+      # Run formatter and linter separately.
+      - id: ruff-format
+        name: ruff-format
+        entry: ruff format
         language: system
         types: [ python ]
 
-      # Run the linter alone
       - id: ruff-check
         name: ruff-check
         entry: ruff check

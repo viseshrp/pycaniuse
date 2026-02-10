@@ -51,7 +51,6 @@ dev = [
     "pytest",
     "pytest-cov",
     "pre-commit",
-    "black",
     "ruff",
     "pip-audit",
     "bandit[toml]",
@@ -222,10 +221,6 @@ max-complexity = 10
 [tool.ruff.lint.isort]
 known-first-party = ["caniuse", "tests"]
 force-sort-within-sections = true
-
-[tool.black]
-line-length = 100
-target-version = ["py310"]
 
 [tool.codespell]
 ignore-words = "codespell.txt"
