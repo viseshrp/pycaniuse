@@ -324,22 +324,74 @@ def _is_primary_ciu_feature(slug: str) -> bool:
     return not slug.startswith("mdn-") and not slug.startswith("wf-")
 
 
+def _is_mdn_feature(slug: str) -> bool:
+    return slug.startswith("mdn-")
+
+
+def _is_wf_feature(slug: str) -> bool:
+    return slug.startswith("wf-")
+
+
 def _build_baseline_note(
     status: str | None,
     low_date: str | None,
     high_date: str | None,
 ) -> str | None:
-    if status == "high":
-        if high_date:
-            return f"Baseline: Widely available across major browsers (since {high_date})."
-        return "Baseline: Widely available across major browsers."
-    if status == "low":
-        if low_date:
-            return f"Baseline: Newly available across major browsers (since {low_date})."
-        return "Baseline: Newly available across major browsers."
+    if status in {"high", "low"}:
+        since_date = low_date or high_date
+        if since_date:
+            try:
+                year, month, _day = since_date.split("-")
+                month_name = (
+                    "January",
+                    "February",
+                    "March",
+                    "April",
+                    "May",
+                    "June",
+                    "July",
+                    "August",
+                    "September",
+                    "October",
+                    "November",
+                    "December",
+                )[max(1, min(12, int(month))) - 1]
+            except (ValueError, IndexError):
+                return "This feature works across the latest devices and major browser versions."
+            return (
+                f"Since {month_name} {year}, this feature works across the latest devices and "
+                "major browser versions."
+            )
+        return "This feature works across the latest devices and major browser versions."
     if status == "limited":
-        return "Baseline: Limited availability across major browsers."
+        return "Limited availability across major browsers."
     return None
+
+
+def _build_mdn_attribution_note(initial_data: dict[str, object] | None) -> str | None:
+    if not isinstance(initial_data, dict):
+        return None
+
+    mdn_url = initial_data.get("mdn_url")
+    path = initial_data.get("path")
+    lines = ["Support data for this feature provided by MDN browser-compat-data."]
+    if isinstance(mdn_url, str) and mdn_url.strip():
+        lines.append(f"MDN reference: {mdn_url.strip()}")
+    if isinstance(path, str) and path.strip():
+        lines.append(
+            "Source data: " f"https://github.com/mdn/browser-compat-data/blob/main/{path.strip()}"
+        )
+    return "\n".join(lines) if lines else None
+
+
+def _build_wf_attribution_note(slug: str) -> str:
+    feature_id = slug.removeprefix("wf-")
+    return (
+        "Support data for this feature provided by the web-features project.\n"
+        "Contributing docs: "
+        "https://github.com/web-platform-dx/web-features/blob/main/docs/CONTRIBUTING.md\n"
+        f"Feature source: https://github.com/web-platform-dx/web-features/blob/main/features/{feature_id}.yml"
+    )
 
 
 def parse_feature_basic(html: str, slug: str) -> FeatureBasic:
@@ -431,14 +483,27 @@ def parse_feature_full(html: str, slug: str) -> FeatureFull:
                 normalized_slug,
             )
 
-    baseline_note = _build_baseline_note(
-        baseline_status,
-        baseline_low_date,
-        baseline_high_date,
-    )
-    notes_tab_text = notes_text
-    if baseline_note:
-        notes_tab_text = f"{baseline_note}\n\n{notes_tab_text}" if notes_tab_text else baseline_note
+    baseline_note = _build_baseline_note(baseline_status, baseline_low_date, baseline_high_date)
+    notes_parts: list[str] = []
+    if _is_mdn_feature(normalized_slug):
+        if notes_text:
+            notes_parts.append(notes_text)
+        mdn_note = _build_mdn_attribution_note(initial_data)
+        if mdn_note:
+            notes_parts.append(mdn_note)
+    elif _is_wf_feature(normalized_slug):
+        if baseline_note:
+            notes_parts.append(baseline_note)
+        if notes_text:
+            notes_parts.append(notes_text)
+        notes_parts.append(_build_wf_attribution_note(normalized_slug))
+    else:
+        if baseline_note:
+            notes_parts.append(baseline_note)
+        if notes_text:
+            notes_parts.append(notes_text)
+
+    notes_tab_text = "\n\n".join([part for part in notes_parts if part.strip()]) or None
 
     tabs: OrderedDict[str, str] = OrderedDict()
     if notes_tab_text:

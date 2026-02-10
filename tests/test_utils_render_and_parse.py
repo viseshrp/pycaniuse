@@ -439,7 +439,57 @@ def test_parse_feature_full_adds_notes_tab_from_baseline_only(
 
     assert full.notes_text is None
     assert "Notes" in full.tabs
-    assert "Baseline: Widely available across major browsers" in full.tabs["Notes"]
+    assert (
+        "Since April 2021, this feature works across the latest devices and major browser versions."
+        in full.tabs["Notes"]
+    )
+
+
+def test_parse_feature_full_uses_mdn_attribution_note(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    initial_payload = [
+        {
+            "id": "mdn-css_properties_column-gap",
+            "path": "css/properties/column-gap.json",
+            "mdn_url": "https://developer.mozilla.org/docs/Web/CSS/Reference/Properties/column-gap",
+            "children": [
+                {
+                    "id": "mdn-css_properties_column-gap_flex_context",
+                    "title": "CSS property: column-gap: Supported in Flex Layout",
+                }
+            ],
+        }
+    ]
+    encoded_initial = json.dumps(initial_payload).replace("\\", "\\\\").replace('"', '\\"')
+    html = f"""
+    <html><body>
+      <h1 class="feature-title">CSS property: column-gap</h1>
+      <div class="support-container">
+        <div class="support-list">
+          <h4 class="browser-heading browser--chrome">Chrome</h4>
+          <ol><li class="stat-cell y current" title="x">1-2</li></ol>
+        </div>
+      </div>
+      <script>
+        window.initialFeatData = {{id: "mdn-css_properties_column-gap", data: "{encoded_initial}"}};
+      </script>
+    </body></html>
+    """
+
+    monkeypatch.setattr(parse_feature_module, "fetch_feature_aux_data", lambda *_args: [])
+    monkeypatch.setattr(parse_feature_module, "fetch_support_data", lambda **_kwargs: {})
+
+    full = parse_feature_full(html, slug="mdn-css_properties_column-gap")
+
+    assert "Notes" in full.tabs
+    assert "MDN browser-compat-data" in full.tabs["Notes"]
+    assert (
+        "Source data: https://github.com/mdn/browser-compat-data/blob/main/css/properties/column-gap.json"
+        in full.tabs["Notes"]
+    )
+    assert "Since " not in full.tabs["Notes"]
+    assert "Sub-features" in full.tabs
 
 
 def test_parse_support_range_text_colon_fallback_and_subfeature_filtering() -> None:
