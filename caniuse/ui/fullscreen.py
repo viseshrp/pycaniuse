@@ -70,7 +70,7 @@ def _format_baseline_date(value: str | None) -> str | None:
 
 def _baseline_summary(feature: FeatureFull) -> str | None:
     status = (feature.baseline_status or "").strip().lower()
-    if not status:
+    if status not in {"high", "low", "limited"}:
         return None
 
     description = _BASELINE_STATUS_LABELS.get(status, status.capitalize())
@@ -381,13 +381,11 @@ def _feature_heading_panel(feature: FeatureFull, width: int) -> Panel:
         title_line.append(f"- {feature.spec_status}", style="cyan")
 
     baseline_text = _baseline_summary(feature)
-    baseline_line = Text()
+    baseline_line: Text | None = None
     if baseline_text:
+        baseline_line = Text()
         baseline_line.append("Baseline: ", style="bold")
         baseline_line.append(baseline_text)
-    else:
-        baseline_line.append("Baseline: ", style="bold")
-        baseline_line.append("Unavailable", style="dim")
 
     usage_line = Text("Global usage: ", style="bold")
     has_usage = False
@@ -413,7 +411,9 @@ def _feature_heading_panel(feature: FeatureFull, width: int) -> Panel:
     if description_lines:
         description = "\n".join(description_lines[:4])
 
-    body: list[Text] = [title_line, baseline_line]
+    body: list[Text] = [title_line]
+    if baseline_line is not None:
+        body.append(baseline_line)
     if feature.spec_url:
         body.append(_linkify_line(feature.spec_url, base_style="cyan"))
     body.extend([Text(""), usage_line, Text(""), Text(description)])

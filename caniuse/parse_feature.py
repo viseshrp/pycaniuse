@@ -272,6 +272,33 @@ def _parse_known_issues(entries: list[dict[str, object]]) -> list[str]:
     return issues
 
 
+def _parse_numbered_notes(data: dict[str, object] | None) -> list[str]:
+    if not isinstance(data, dict):
+        return []
+    raw_notes = data.get("notes_by_num")
+    if not isinstance(raw_notes, dict):
+        raw_notes = data.get("notesByNum")
+    if not isinstance(raw_notes, dict):
+        return []
+
+    def _note_sort_key(item: tuple[object, object]) -> tuple[int, str]:
+        key = str(item[0]).strip()
+        if key.isdigit():
+            return (0, f"{int(key):08d}")
+        return (1, key)
+
+    output: list[str] = []
+    for key_obj, value in sorted(raw_notes.items(), key=_note_sort_key):
+        key = str(key_obj).strip()
+        if not key:
+            continue
+        if isinstance(value, str):
+            cleaned = value.strip()
+            if cleaned:
+                output.append(f"[{key}] {cleaned}")
+    return output
+
+
 def _parse_resource_entries(entries: list[dict[str, object]]) -> list[tuple[str, str]]:
     resources: list[tuple[str, str]] = []
     for entry in entries:
@@ -337,35 +364,33 @@ def _build_baseline_note(
     low_date: str | None,
     high_date: str | None,
 ) -> str | None:
-    if status in {"high", "low"}:
-        since_date = low_date or high_date
-        if since_date:
-            try:
-                year, month, _day = since_date.split("-")
-                month_name = (
-                    "January",
-                    "February",
-                    "March",
-                    "April",
-                    "May",
-                    "June",
-                    "July",
-                    "August",
-                    "September",
-                    "October",
-                    "November",
-                    "December",
-                )[max(1, min(12, int(month))) - 1]
-            except (ValueError, IndexError):
-                return "This feature works across the latest devices and major browser versions."
-            return (
-                f"Since {month_name} {year}, this feature works across the latest devices and "
-                "major browser versions."
-            )
-        return "This feature works across the latest devices and major browser versions."
-    if status == "limited":
-        return "Limited availability across major browsers."
-    return None
+    if status not in {"high", "low"}:
+        return None
+    since_date = low_date or high_date
+    if since_date:
+        try:
+            year, month, _day = since_date.split("-")
+            month_name = (
+                "January",
+                "February",
+                "March",
+                "April",
+                "May",
+                "June",
+                "July",
+                "August",
+                "September",
+                "October",
+                "November",
+                "December",
+            )[max(1, min(12, int(month))) - 1]
+        except (ValueError, IndexError):
+            return "This feature works across the latest devices and major browser versions."
+        return (
+            f"Since {month_name} {year}, this feature works across the latest devices and "
+            "major browser versions."
+        )
+    return "This feature works across the latest devices and major browser versions."
 
 
 def _build_mdn_attribution_note(initial_data: dict[str, object] | None) -> str | None:
@@ -435,6 +460,7 @@ def parse_feature_full(html: str, slug: str) -> FeatureFull:
         initial_notes = initial_data.get("notes")
         if isinstance(initial_notes, str) and initial_notes.strip():
             notes_text = initial_notes.strip()
+    numbered_notes = _parse_numbered_notes(initial_data)
 
     known_issues: list[str] = []
     resources = _parse_resources(doc)
@@ -488,6 +514,8 @@ def parse_feature_full(html: str, slug: str) -> FeatureFull:
     if _is_mdn_feature(normalized_slug):
         if notes_text:
             notes_parts.append(notes_text)
+        if numbered_notes:
+            notes_parts.append("\n".join(numbered_notes))
         mdn_note = _build_mdn_attribution_note(initial_data)
         if mdn_note:
             notes_parts.append(mdn_note)
@@ -496,12 +524,16 @@ def parse_feature_full(html: str, slug: str) -> FeatureFull:
             notes_parts.append(baseline_note)
         if notes_text:
             notes_parts.append(notes_text)
+        if numbered_notes:
+            notes_parts.append("\n".join(numbered_notes))
         notes_parts.append(_build_wf_attribution_note(normalized_slug))
     else:
         if baseline_note:
             notes_parts.append(baseline_note)
         if notes_text:
             notes_parts.append(notes_text)
+        if numbered_notes:
+            notes_parts.append("\n".join(numbered_notes))
 
     notes_tab_text = "\n\n".join([part for part in notes_parts if part.strip()]) or None
 

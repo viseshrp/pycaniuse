@@ -445,6 +445,87 @@ def test_parse_feature_full_adds_notes_tab_from_baseline_only(
     )
 
 
+def test_parse_feature_full_hides_notes_when_limited_has_no_note_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    initial_payload = [
+        {
+            "id": "multicolumn",
+            "notes": "",
+            "bug_count": 0,
+            "link_count": 0,
+            "children": None,
+            "baseline_status": {
+                "status": "limited",
+                "lowDate": "2015-01-01",
+                "highDate": "2017-01-01",
+            },
+        }
+    ]
+    encoded_initial = json.dumps(initial_payload).replace("\\", "\\\\").replace('"', '\\"')
+    html = f"""
+    <html><body>
+      <h1 class="feature-title">CSS3 Multiple column layout</h1>
+      <div class="support-container">
+        <div class="support-list">
+          <h4 class="browser-heading browser--chrome">Chrome</h4>
+          <ol><li class="stat-cell a current" title="x">1-2</li></ol>
+        </div>
+      </div>
+      <script>window.initialFeatData = {{id: "multicolumn", data: "{encoded_initial}"}};</script>
+    </body></html>
+    """
+
+    monkeypatch.setattr(parse_feature_module, "fetch_feature_aux_data", lambda *_args: [])
+    monkeypatch.setattr(parse_feature_module, "fetch_support_data", lambda **_kwargs: {})
+
+    full = parse_feature_full(html, slug="multicolumn")
+
+    assert "Notes" not in full.tabs
+
+
+def test_parse_feature_full_includes_numbered_notes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    initial_payload = [
+        {
+            "id": "multicolumn",
+            "notes": "",
+            "notes_by_num": {"1": "First note", "3": "Third note"},
+            "bug_count": 0,
+            "link_count": 0,
+            "children": None,
+            "baseline_status": {
+                "status": "limited",
+                "lowDate": "2015-01-01",
+                "highDate": "2017-01-01",
+            },
+        }
+    ]
+    encoded_initial = json.dumps(initial_payload).replace("\\", "\\\\").replace('"', '\\"')
+    html = f"""
+    <html><body>
+      <h1 class="feature-title">CSS3 Multiple column layout</h1>
+      <div class="support-container">
+        <div class="support-list">
+          <h4 class="browser-heading browser--chrome">Chrome</h4>
+          <ol><li class="stat-cell a current" title="x">1-2</li></ol>
+        </div>
+      </div>
+      <script>window.initialFeatData = {{id: "multicolumn", data: "{encoded_initial}"}};</script>
+    </body></html>
+    """
+
+    monkeypatch.setattr(parse_feature_module, "fetch_feature_aux_data", lambda *_args: [])
+    monkeypatch.setattr(parse_feature_module, "fetch_support_data", lambda **_kwargs: {})
+
+    full = parse_feature_full(html, slug="multicolumn")
+
+    assert "Notes" in full.tabs
+    assert "[1] First note" in full.tabs["Notes"]
+    assert "[3] Third note" in full.tabs["Notes"]
+
+
 def test_parse_feature_full_uses_mdn_attribution_note(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

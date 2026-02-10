@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import builtins
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -201,6 +202,9 @@ def test_fullscreen_render_helpers_cover_core_paths() -> None:
 
     no_tabs_sections = fs._tab_sections(_sample_feature_full(with_tabs=False))
     assert any(name == "Resources" for name, _ in no_tabs_sections)
+
+    no_baseline_feature = replace(_sample_feature_full(with_tabs=True), baseline_status="unknown")
+    assert fs._baseline_summary(no_baseline_feature) is None
 
 
 def test_fullscreen_link_and_usage_parsing() -> None:
