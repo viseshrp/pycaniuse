@@ -38,6 +38,7 @@ _KEY = Literal[
     "quit",
     "noop",
 ]
+_TEXTUAL_MODE = Literal["off", "auto", "force"]
 _STATUS_STYLE_MAP = {
     "y": "black on green3",
     "n": "white on red3",
@@ -51,6 +52,8 @@ _ERA_STYLE_MAP = {
 }
 _GLOBAL_USAGE_RE = re.compile(r"Global usage:\s*([0-9]+(?:\.[0-9]+)?)%")
 _LINK_TOKEN_RE = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)|(https?://[^\s)]+)")
+_TEXTUAL_FLAG_ENV = "PYCANIUSE_TEXTUAL_FULL"
+_ENABLED_VALUES = frozenset({"1", "true", "yes", "on"})
 
 
 @dataclass
@@ -463,13 +466,17 @@ def _footer_panel() -> Panel:
     return Panel(Group(controls, legend), border_style="grey50")
 
 
-def _build_layout(feature: FeatureFull, state: _TuiState, console: Console) -> Layout:
-    size = console.size
+def _build_layout_for_size(
+    feature: FeatureFull,
+    state: _TuiState,
+    width: int,
+    height: int,
+) -> Layout:
     root = Layout()
     footer_size = 4
-    feature_size = 10 if size.height >= 32 else 8
-    support_size = min(max(size.height // 3, 9), 16)
-    details_size = max(size.height - footer_size - feature_size - support_size, 8)
+    feature_size = 10 if height >= 32 else 8
+    support_size = min(max(height // 3, 9), 16)
+    details_size = max(height - footer_size - feature_size - support_size, 8)
 
     support_rows = max(support_size - 3, 5)
     details_rows = max(details_size - 2, 6)
@@ -481,11 +488,15 @@ def _build_layout(feature: FeatureFull, state: _TuiState, console: Console) -> L
         Layout(name="footer", size=footer_size),
     )
 
-    root["feature"].update(_feature_heading_panel(feature, size.width))
-    root["support"].update(_support_overview_panel(feature, state, size.width - 6, support_rows))
+    root["feature"].update(_feature_heading_panel(feature, width))
+    root["support"].update(_support_overview_panel(feature, state, width - 6, support_rows))
     root["details"].update(_tab_panel(feature, state, details_rows))
     root["footer"].update(_footer_panel())
     return root
+
+
+def _build_layout(feature: FeatureFull, state: _TuiState, console: Console) -> Layout:
+    return _build_layout_for_size(feature, state, console.size.width, console.size.height)
 
 
 def _decode_escape_sequence(sequence: bytes) -> _KEY:
@@ -638,6 +649,21 @@ def _supports_tui(console: Console) -> bool:
     return True
 
 
+def _textual_feature_enabled() -> bool:
+    value = os.getenv(_TEXTUAL_FLAG_ENV, "")
+    return value.strip().lower() in _ENABLED_VALUES
+
+
+def _try_run_textual_tui(feature: FeatureFull) -> bool:
+    try:
+        from .textual_fullscreen import run_textual_fullscreen
+    except ImportError:
+        return False
+
+    run_textual_fullscreen(feature)
+    return True
+
+
 def _apply_key(key: _KEY, state: _TuiState, feature: FeatureFull) -> bool:
     browser_count = len(feature.browser_blocks)
     if key == "quit":
@@ -705,9 +731,14 @@ def _run_tui(console: Console, feature: FeatureFull) -> None:
                 break
 
 
-def run_fullscreen(feature: FeatureFull) -> None:
+def run_fullscreen(feature: FeatureFull, *, textual_mode: _TEXTUAL_MODE = "off") -> None:
     """Render full mode as interactive TUI when supported; otherwise print static output."""
     console = Console()
+    if sys.stdout.isatty() and textual_mode != "off":
+        should_try_textual = textual_mode == "force" or _textual_feature_enabled()
+        if should_try_textual and _try_run_textual_tui(feature):
+            return
+
     if _supports_tui(console):
         _run_tui(console, feature)
         return

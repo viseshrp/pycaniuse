@@ -333,6 +333,75 @@ def test_fullscreen_tty_uses_tui(monkeypatch: pytest.MonkeyPatch) -> None:
     assert called["tui"] is True
 
 
+def test_fullscreen_textual_force_uses_textual_when_tty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    feature = _sample_feature_full()
+    monkeypatch.setattr(fs.sys, "stdout", _FakeInOut(is_tty=True))
+    monkeypatch.setattr(fs.sys, "stdin", _FakeInOut(is_tty=True))
+    called = {"textual": False}
+
+    def _run_textual(arg_feature: FeatureFull) -> bool:
+        called["textual"] = True
+        assert arg_feature is feature
+        return True
+
+    monkeypatch.setattr(fs, "_try_run_textual_tui", _run_textual)
+    monkeypatch.setattr(fs, "Console", lambda: _FakeConsole(width=120, height=40))
+
+    fs.run_fullscreen(feature, textual_mode="force")
+    assert called["textual"] is True
+
+
+def test_fullscreen_textual_auto_flag_and_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    feature = _sample_feature_full()
+    monkeypatch.setattr(fs.sys, "stdout", _FakeInOut(is_tty=True))
+    monkeypatch.setattr(fs.sys, "stdin", _FakeInOut(is_tty=True))
+
+    called = {"textual": False, "rich": False}
+
+    def _run_textual(_feature: FeatureFull) -> bool:
+        called["textual"] = True
+        return False
+
+    def _run_tui(_console: object, _feature: FeatureFull) -> None:
+        called["rich"] = True
+
+    monkeypatch.setattr(fs, "_try_run_textual_tui", _run_textual)
+    monkeypatch.setattr(fs, "_supports_tui", lambda _console: True)
+    monkeypatch.setattr(fs, "_run_tui", _run_tui)
+    monkeypatch.setattr(fs, "Console", lambda: _FakeConsole(width=120, height=40))
+    monkeypatch.setattr(fs, "_textual_feature_enabled", lambda: True)
+
+    fs.run_fullscreen(feature, textual_mode="auto")
+    assert called["textual"] is True
+    assert called["rich"] is True
+
+    called = {"textual": False, "rich": False}
+    monkeypatch.setattr(fs, "_textual_feature_enabled", lambda: False)
+    fs.run_fullscreen(feature, textual_mode="auto")
+    assert called["textual"] is False
+    assert called["rich"] is True
+
+
+def test_fullscreen_textual_never_runs_without_tty(monkeypatch: pytest.MonkeyPatch) -> None:
+    feature = _sample_feature_full()
+    monkeypatch.setattr(fs.sys, "stdout", _FakeInOut(is_tty=False))
+    monkeypatch.setattr(fs.sys, "stdin", _FakeInOut(is_tty=False))
+    called = {"textual": False}
+
+    def _run_textual(_feature: FeatureFull) -> bool:
+        called["textual"] = True
+        return True
+
+    fake_console = _FakeConsole(width=120, height=40)
+    monkeypatch.setattr(fs, "_try_run_textual_tui", _run_textual)
+    monkeypatch.setattr(fs, "Console", lambda: fake_console)
+    fs.run_fullscreen(feature, textual_mode="force")
+    assert called["textual"] is False
+    assert fake_console.printed
+
+
 def test_fullscreen_tty_without_pager_falls_back_to_print(monkeypatch: pytest.MonkeyPatch) -> None:
     feature = _sample_feature_full()
     fake_console = _FakeConsoleNoPager(width=120, height=40)
@@ -537,7 +606,8 @@ def test_cli_full_mode_and_error_path(monkeypatch: pytest.MonkeyPatch) -> None:
 
     called = {"full": False}
 
-    def _run_fullscreen(_feature: FeatureFull) -> None:
+    def _run_fullscreen(_feature: FeatureFull, *, textual_mode: str = "off") -> None:
+        _ = textual_mode
         called["full"] = True
 
     monkeypatch.setattr(cli, "run_fullscreen", _run_fullscreen)
