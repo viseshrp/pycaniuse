@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+import json
+import re
 from typing import Literal
 
 from .constants import BASE_URL, BASIC_MODE_BROWSERS
+from .exceptions import CaniuseError
+from .http import fetch_feature_aux_data, fetch_support_data
 from .model import BrowserSupportBlock, FeatureBasic, FeatureFull, SupportRange
 from .util.html import (
     all_nodes,
@@ -20,6 +24,10 @@ from .util.html import (
 from .util.text import parse_percent
 
 _STATUS_CLASS_ORDER: tuple[Literal["y", "n", "a", "u"], ...] = ("y", "n", "a", "u")
+_INITIAL_FEAT_DATA_RE = re.compile(
+    r'window\.initialFeatData\s*=\s*\{id:\s*"(?P<id>[^"]+)",\s*data:\s*"(?P<data>.*?)"\s*\};',
+    re.DOTALL,
+)
 
 
 def _parse_title(doc: object, slug: str) -> str:
@@ -187,6 +195,132 @@ def _parse_subfeatures(doc: object) -> list[tuple[str, str]]:
     return subfeatures
 
 
+def _parse_initial_feature_data(html: str) -> dict[str, object] | None:
+    match = _INITIAL_FEAT_DATA_RE.search(html)
+    if match is None:
+        return None
+
+    raw_data = match.group("data")
+    try:
+        decoded = json.loads(f'"{raw_data}"')
+        payload = json.loads(decoded)
+    except json.JSONDecodeError:
+        return None
+
+    if not isinstance(payload, list) or not payload:
+        return None
+    first_item = payload[0]
+    if not isinstance(first_item, dict):
+        return None
+    return first_item
+
+
+def _clean_date(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip().lstrip("≤").strip()
+    return cleaned or None
+
+
+def _parse_baseline_fields(data: dict[str, object]) -> tuple[str | None, str | None, str | None]:
+    baseline = data.get("baseline_status")
+    if not isinstance(baseline, dict):
+        baseline = data.get("baselineStatus")
+    if not isinstance(baseline, dict):
+        return None, None, None
+
+    raw_status = baseline.get("status")
+    status = raw_status.strip().lower() if isinstance(raw_status, str) else None
+    low_date = _clean_date(baseline.get("lowDate") or baseline.get("low_date"))
+    high_date = _clean_date(baseline.get("highDate") or baseline.get("high_date"))
+    return status, low_date, high_date
+
+
+def _parse_baseline_from_metadata(
+    payload: dict[str, object],
+    slug: str,
+) -> tuple[str | None, str | None, str | None]:
+    meta_data = payload.get("metaData")
+    if not isinstance(meta_data, list):
+        return None, None, None
+
+    for item in meta_data:
+        if not isinstance(item, dict):
+            continue
+        item_id = item.get("id")
+        if not isinstance(item_id, str) or item_id.strip().lower() != slug:
+            continue
+        raw_status = item.get("baselineStatus")
+        status = raw_status.strip().lower() if isinstance(raw_status, str) else None
+        low_date = _clean_date(item.get("baselineLowDate"))
+        high_date = _clean_date(item.get("baselineHighDate"))
+        return status, low_date, high_date
+
+    return None, None, None
+
+
+def _parse_known_issues(entries: list[dict[str, object]]) -> list[str]:
+    issues: list[str] = []
+    for entry in entries:
+        description = entry.get("description")
+        if isinstance(description, str):
+            cleaned = description.strip()
+            if cleaned:
+                issues.append(cleaned)
+    return issues
+
+
+def _parse_resource_entries(entries: list[dict[str, object]]) -> list[tuple[str, str]]:
+    resources: list[tuple[str, str]] = []
+    for entry in entries:
+        title = entry.get("title")
+        url = entry.get("url")
+        if not isinstance(title, str) or not isinstance(url, str):
+            continue
+        cleaned_title = title.strip()
+        cleaned_url = safe_join_url(BASE_URL, url.strip())
+        if cleaned_title and cleaned_url:
+            resources.append((cleaned_title, cleaned_url))
+    return resources
+
+
+def _parse_subfeatures_from_initial_data(data: dict[str, object]) -> list[tuple[str, str]]:
+    output: list[tuple[str, str]] = []
+    raw_items = data.get("children")
+    if not isinstance(raw_items, list):
+        raw_items = data.get("bcd_features")
+    if not isinstance(raw_items, list):
+        return output
+
+    seen: set[str] = set()
+    for item in raw_items:
+        feature_id: str | None = None
+        title: str | None = None
+        if isinstance(item, str):
+            feature_id = item.strip().lower()
+        elif isinstance(item, dict):
+            raw_id = item.get("id")
+            if isinstance(raw_id, str):
+                feature_id = raw_id.strip().lower()
+            raw_title = item.get("title")
+            if isinstance(raw_title, str):
+                title = raw_title.strip()
+
+        if not feature_id:
+            continue
+        href = safe_join_url(BASE_URL, f"/{feature_id}")
+        if not href or href in seen:
+            continue
+        seen.add(href)
+        output.append((title or feature_id, href))
+
+    return output
+
+
+def _is_primary_ciu_feature(slug: str) -> bool:
+    return not slug.startswith("mdn-") and not slug.startswith("wf-")
+
+
 def parse_feature_basic(html: str, slug: str) -> FeatureBasic:
     """Parse feature page content for basic mode."""
     doc = parse_document(html)
@@ -216,18 +350,71 @@ def parse_feature_basic(html: str, slug: str) -> FeatureBasic:
 def parse_feature_full(html: str, slug: str) -> FeatureFull:
     """Parse feature page content for full-screen mode."""
     doc = parse_document(html)
+    normalized_slug = slug.strip().lower()
+    initial_data = _parse_initial_feature_data(html)
 
     spec_url, spec_status = _parse_spec(doc)
     usage_supported, usage_partial, usage_total = _parse_usage(doc)
     browser_blocks = _parse_support_blocks(doc, include_all=True)
 
     notes_text = _parse_notes(doc)
+    if not notes_text and isinstance(initial_data, dict):
+        initial_notes = initial_data.get("notes")
+        if isinstance(initial_notes, str) and initial_notes.strip():
+            notes_text = initial_notes.strip()
+
+    known_issues: list[str] = []
     resources = _parse_resources(doc)
     subfeatures = _parse_subfeatures(doc)
+    baseline_status: str | None = None
+    baseline_low_date: str | None = None
+    baseline_high_date: str | None = None
+
+    if isinstance(initial_data, dict):
+        if not subfeatures:
+            subfeatures = _parse_subfeatures_from_initial_data(initial_data)
+
+        baseline_status, baseline_low_date, baseline_high_date = _parse_baseline_fields(
+            initial_data
+        )
+
+        if _is_primary_ciu_feature(normalized_slug):
+            bug_count = initial_data.get("bug_count")
+            if isinstance(bug_count, int) and bug_count > 0:
+                try:
+                    known_issues = _parse_known_issues(
+                        fetch_feature_aux_data(normalized_slug, "bugs")
+                    )
+                except CaniuseError:
+                    known_issues = []
+
+            link_count = initial_data.get("link_count")
+            should_fetch_links = isinstance(link_count, int) and link_count >= 0
+            if should_fetch_links or not resources:
+                try:
+                    api_resources = _parse_resource_entries(
+                        fetch_feature_aux_data(normalized_slug, "links")
+                    )
+                    if api_resources:
+                        resources = api_resources
+                except CaniuseError:
+                    pass
+
+        if baseline_status is None:
+            try:
+                metadata_payload = fetch_support_data(meta_data_feats=[normalized_slug])
+            except CaniuseError:
+                metadata_payload = {}
+            baseline_status, baseline_low_date, baseline_high_date = _parse_baseline_from_metadata(
+                metadata_payload,
+                normalized_slug,
+            )
 
     tabs: OrderedDict[str, str] = OrderedDict()
     if notes_text:
         tabs["Notes"] = notes_text
+    if known_issues:
+        tabs["Known issues"] = "\n".join([f"- {item}" for item in known_issues])
     if resources:
         tabs["Resources"] = "\n".join([f"- {label}: {url}" for label, url in resources])
     if subfeatures:
@@ -249,7 +436,11 @@ def parse_feature_full(html: str, slug: str) -> FeatureFull:
         browser_blocks=browser_blocks,
         parse_warnings=parse_warnings,
         notes_text=notes_text,
+        known_issues=known_issues,
         resources=resources,
         subfeatures=subfeatures,
+        baseline_status=baseline_status,
+        baseline_low_date=baseline_low_date,
+        baseline_high_date=baseline_high_date,
         tabs=dict(tabs),
     )

@@ -7,7 +7,7 @@ import pytest
 
 from caniuse import caniuse as caniuse_shim
 from caniuse import http
-from caniuse.constants import FEATURE_URL_TEMPLATE, SEARCH_URL
+from caniuse.constants import FEATURE_DATA_URL, FEATURE_URL_TEMPLATE, SEARCH_URL
 from caniuse.exceptions import ContentError, HttpStatusError, NetworkError, RequestTimeoutError
 
 
@@ -298,3 +298,76 @@ def test_use_shared_client_applies_custom_timeout_to_shared_client(
         assert http.fetch_html("https://caniuse.com/flexbox") == "<html>ok</html>"
 
     assert _TimeoutClient.created_timeouts == [2.5]
+
+
+def test_fetch_search_feature_ids_parses_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        http,
+        "fetch_html",
+        lambda url, params=None, timeout=10.0, allow_static_fallback=False: (
+            '{"featureIds":["mdn-css_properties_gap","flexbox-gap","wf-font-metric-overrides"]}'
+        ),
+    )
+
+    ids = http.fetch_search_feature_ids("gap")
+
+    assert ids == ["mdn-css_properties_gap", "flexbox-gap", "wf-font-metric-overrides"]
+
+
+def test_fetch_search_feature_ids_invalid_json_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        http,
+        "fetch_html",
+        lambda url, params=None, timeout=10.0, allow_static_fallback=False: "not json",
+    )
+
+    with pytest.raises(ContentError):
+        http.fetch_search_feature_ids("gap")
+
+
+def test_fetch_support_data_posts_expected_form(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, object] = {}
+
+    def _fake_post_form(url: str, form_data: dict[str, str], timeout: float = 10.0) -> str:
+        seen["url"] = url
+        seen["form_data"] = dict(form_data)
+        seen["timeout"] = timeout
+        return '{"fullData":[{"id":"flexbox","title":"Flexbox"}]}'
+
+    monkeypatch.setattr(http, "_post_form", _fake_post_form)
+
+    payload = http.fetch_support_data(
+        full_data_feats=["flexbox", "Flexbox", "css-grid"],
+        meta_data_feats=["flexbox"],
+    )
+
+    assert seen["url"] == FEATURE_DATA_URL
+    assert seen["timeout"] == 10.0
+    assert seen["form_data"] == {
+        "type": "support-data",
+        "fullDataFeats": "flexbox,css-grid",
+        "metaDataFeats": "flexbox",
+    }
+    assert payload["fullData"] == [{"id": "flexbox", "title": "Flexbox"}]
+
+
+def test_fetch_feature_aux_data_parses_entries(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, dict[str, str] | None]] = []
+
+    def _fake_fetch_html(
+        url: str,
+        params: dict[str, str] | None = None,
+        timeout: float = 10.0,
+        *,
+        allow_static_fallback: bool = False,
+    ) -> str:
+        _ = timeout, allow_static_fallback
+        calls.append((url, params))
+        return '[{"description":"one"}, {"description":"two"}]'
+
+    monkeypatch.setattr(http, "fetch_html", _fake_fetch_html)
+
+    entries = http.fetch_feature_aux_data("flexbox", "bugs")
+
+    assert calls == [(FEATURE_DATA_URL, {"feat": "flexbox", "type": "bugs"})]
+    assert entries == [{"description": "one"}, {"description": "two"}]

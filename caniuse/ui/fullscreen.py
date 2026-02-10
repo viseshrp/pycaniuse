@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 import sys
 import textwrap
 
@@ -26,6 +27,11 @@ _ERA_STYLE_MAP = {
     "past": "dim",
     "current": "bold cyan",
     "future": "magenta",
+}
+_BASELINE_STATUS_LABELS = {
+    "high": "Widely available across major browsers",
+    "low": "Newly available across major browsers",
+    "limited": "Limited availability across major browsers",
 }
 
 
@@ -52,8 +58,37 @@ def _support_lines(feature: FeatureFull) -> list[str]:
     return lines or ["No browser support blocks found."]
 
 
+def _format_baseline_date(value: str | None) -> str | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        return value
+    return parsed.strftime("%B %Y")
+
+
+def _baseline_summary(feature: FeatureFull) -> str | None:
+    status = (feature.baseline_status or "").strip().lower()
+    if not status:
+        return None
+
+    description = _BASELINE_STATUS_LABELS.get(status, status.capitalize())
+    if status == "high":
+        since = _format_baseline_date(feature.baseline_high_date)
+        return f"{description}{f' (since {since})' if since else ''}"
+    if status == "low":
+        since = _format_baseline_date(feature.baseline_low_date)
+        return f"{description}{f' (since {since})' if since else ''}"
+    return description
+
+
 def _feature_lines(feature: FeatureFull) -> list[str]:
     lines: list[str] = [feature.title]
+
+    baseline_summary = _baseline_summary(feature)
+    if baseline_summary:
+        lines.append(f"Baseline: {baseline_summary}")
 
     if feature.spec_url:
         suffix = f" [{feature.spec_status}]" if feature.spec_status else ""
@@ -82,6 +117,12 @@ def _feature_lines(feature: FeatureFull) -> list[str]:
     if feature.notes_text:
         lines.append("Notes")
         lines.append(feature.notes_text)
+        lines.append("")
+
+    if feature.known_issues:
+        lines.append("Known issues")
+        for issue in feature.known_issues:
+            lines.append(f"- {issue}")
         lines.append("")
 
     if feature.resources:
@@ -130,25 +171,6 @@ def _render_lines(feature: FeatureFull, width: int) -> list[str]:
 
 def _tab_sections(feature: FeatureFull) -> list[tuple[str, list[str]]]:
     sections: list[tuple[str, list[str]]] = []
-    info_lines: list[str] = []
-    if feature.spec_url:
-        suffix = f" ({feature.spec_status})" if feature.spec_status else ""
-        info_lines.append(f"Spec: {feature.spec_url}{suffix}")
-
-    usage_parts: list[str] = []
-    if feature.usage_supported is not None:
-        usage_parts.append(f"✅ {feature.usage_supported:.2f}%")
-    if feature.usage_partial is not None:
-        usage_parts.append(f"◐ {feature.usage_partial:.2f}%")
-    if feature.usage_total is not None:
-        usage_parts.append(f"Total {feature.usage_total:.2f}%")
-    if usage_parts:
-        info_lines.append("Usage: " + "  ".join(usage_parts))
-    if feature.description_text:
-        info_lines.extend(["", "Description", feature.description_text])
-    if not info_lines:
-        info_lines = ["No additional feature metadata."]
-    sections.append(("Info", info_lines))
 
     if feature.tabs:
         for tab_name, tab_content in feature.tabs.items():
@@ -157,6 +179,8 @@ def _tab_sections(feature: FeatureFull) -> list[tuple[str, list[str]]]:
     else:
         if feature.notes_text:
             sections.append(("Notes", [feature.notes_text]))
+        if feature.known_issues:
+            sections.append(("Known issues", [f"- {issue}" for issue in feature.known_issues]))
         if feature.resources:
             sections.append(
                 ("Resources", [f"- {label}: {url}" for label, url in feature.resources])
@@ -166,7 +190,8 @@ def _tab_sections(feature: FeatureFull) -> list[tuple[str, list[str]]]:
                 ("Sub-features", [f"- {label}: {url}" for label, url in feature.subfeatures])
             )
 
-    sections.append(("Legend", _legend_lines()[1:]))
+    if not sections:
+        return [("Details", ["No notes, known issues, resources, or sub-features available."])]
     return sections
 
 
@@ -355,6 +380,15 @@ def _feature_heading_panel(feature: FeatureFull, width: int) -> Panel:
         title_line.append("  ")
         title_line.append(f"- {feature.spec_status}", style="cyan")
 
+    baseline_text = _baseline_summary(feature)
+    baseline_line = Text()
+    if baseline_text:
+        baseline_line.append("Baseline: ", style="bold")
+        baseline_line.append(baseline_text)
+    else:
+        baseline_line.append("Baseline: ", style="bold")
+        baseline_line.append("Unavailable", style="dim")
+
     usage_line = Text("Global usage: ", style="bold")
     has_usage = False
     if feature.usage_supported is not None:
@@ -379,7 +413,7 @@ def _feature_heading_panel(feature: FeatureFull, width: int) -> Panel:
     if description_lines:
         description = "\n".join(description_lines[:4])
 
-    body: list[Text] = [title_line]
+    body: list[Text] = [title_line, baseline_line]
     if feature.spec_url:
         body.append(_linkify_line(feature.spec_url, base_style="cyan"))
     body.extend([Text(""), usage_line, Text(""), Text(description)])

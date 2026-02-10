@@ -48,6 +48,10 @@ class FeatureBasic:
 @dataclass(frozen=True)
 class FeatureFull(FeatureBasic):
     notes_text: str | None = None
+    known_issues: list[str] = field(default_factory=list)
     resources: list[tuple[str, str]] = field(default_factory=list)
     subfeatures: list[tuple[str, str]] = field(default_factory=list)
+    baseline_status: str | None = None
+    baseline_low_date: str | None = None
+    baseline_high_date: str | None = None
     tabs: dict[str, str] = field(default_factory=dict)

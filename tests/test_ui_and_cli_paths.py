@@ -69,8 +69,12 @@ def _sample_feature_full(*, with_tabs: bool = True, browser_count: int = 2) -> F
         browser_blocks=blocks,
         parse_warnings=[],
         notes_text="Note text",
+        known_issues=["Issue text"],
         resources=[("Res", "https://example.com/res")],
         subfeatures=[("Sub", "https://example.com/sub")],
+        baseline_status="high",
+        baseline_low_date="2015-09-30",
+        baseline_high_date="2018-03-30",
         tabs={"Notes": "notes line", "Resources": "resource line"} if with_tabs else {},
     )
 
@@ -192,7 +196,7 @@ def test_fullscreen_render_helpers_cover_core_paths() -> None:
     assert fs._render_lines(feature, 50)
 
     sections = fs._tab_sections(feature)
-    assert sections[0][0] == "Info"
+    assert sections[0][0] == "Notes"
     assert any(name == "Notes" for name, _ in sections)
 
     no_tabs_sections = fs._tab_sections(_sample_feature_full(with_tabs=False))

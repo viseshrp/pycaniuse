@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import json
 from typing import ClassVar
 
 import pytest
 from rich.console import Console
 
 from caniuse.model import BrowserSupportBlock, FeatureBasic, SupportRange
+import caniuse.parse_feature as parse_feature_module
 from caniuse.parse_feature import _parse_support_range_text, parse_feature_basic, parse_feature_full
+import caniuse.parse_search as parse_search_module
 from caniuse.parse_search import _slug_from_href, parse_search_results
 from caniuse.render_basic import _usage_line, render_basic
 from caniuse.util import html as html_utils
@@ -103,7 +106,8 @@ def test_parse_search_slug_and_primary_strategy() -> None:
     assert _slug_from_href("/flexbox?x=1") is None
     assert _slug_from_href("flexbox") is None
     assert _slug_from_href("/issue-list") is None
-    assert _slug_from_href("/bad_slug") is None
+    assert _slug_from_href("/bad.slug") is None
+    assert _slug_from_href("/bad_slug") == "bad_slug"
     assert _slug_from_href("/flexbox") == "flexbox"
 
     html = """
@@ -117,6 +121,63 @@ def test_parse_search_slug_and_primary_strategy() -> None:
     """
     matches = parse_search_results(html)
     assert [m.slug for m in matches] == ["grid"]
+
+
+def test_parse_search_results_prefers_backend_api_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    html = """
+    <html>
+      <head><title>"gap" | Can I use</title></head>
+      <body><div class='search-results'><a href='/flexbox-gap'>Gap</a></div></body>
+    </html>
+    """
+
+    monkeypatch.setattr(
+        parse_search_module,
+        "fetch_search_feature_ids",
+        lambda _query: ["mdn-css_properties_gap", "flexbox-gap"],
+    )
+    monkeypatch.setattr(
+        parse_search_module,
+        "fetch_support_data",
+        lambda **_kwargs: {
+            "fullData": [
+                {"id": "mdn-css_properties_gap", "title": "CSS property: gap"},
+                {"id": "flexbox-gap", "title": "gap property for Flexbox"},
+            ]
+        },
+    )
+
+    matches = parse_search_results(html)
+
+    assert [match.slug for match in matches] == ["mdn-css_properties_gap", "flexbox-gap"]
+    assert [match.title for match in matches] == ["CSS property: gap", "gap property for Flexbox"]
+
+
+def test_parse_search_results_keeps_html_fallback_when_api_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    html = """
+    <html>
+      <head><title>"gap" | Can I use</title></head>
+      <body>
+        <div class='search-results'>
+          <a href='/flexbox-gap'>gap property for Flexbox</a>
+          <a href='/multicolumn'>CSS3 Multiple column layout</a>
+        </div>
+      </body>
+    </html>
+    """
+
+    def _boom(_query: str) -> list[str]:
+        raise parse_search_module.CaniuseError("boom")
+
+    monkeypatch.setattr(parse_search_module, "fetch_search_feature_ids", _boom)
+
+    matches = parse_search_results(html)
+
+    assert [match.slug for match in matches] == ["flexbox-gap", "multicolumn"]
 
 
 def test_render_basic_and_usage_branches() -> None:
@@ -279,6 +340,65 @@ def test_parse_feature_slug_title_fallback_and_invalid_browser_heading() -> None
     assert full.title == "fallback-slug"
     assert full.browser_blocks == []
     assert full.parse_warnings == ["support"]
+
+
+def test_parse_feature_full_uses_initial_data_and_dynamic_tabs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    initial_payload = [
+        {
+            "id": "flexbox",
+            "notes": "Initial note text",
+            "bug_count": 2,
+            "link_count": 1,
+            "children": ["flexbox-gap"],
+            "baseline_status": {
+                "status": "high",
+                "lowDate": "2015-09-30",
+                "highDate": "2018-03-30",
+            },
+        }
+    ]
+    encoded_initial = json.dumps(initial_payload).replace("\\", "\\\\").replace('"', '\\"')
+    html = f"""
+    <html><body>
+      <h1 class="feature-title">Flexbox</h1>
+      <a class="specification cr" href="/spec">Flexbox - CR</a>
+      <li class="support-stats" data-usage-id="region.global">
+        <span class="support">95.00%</span>
+        <span class="partial">1.00%</span>
+        <span class="total">96.00%</span>
+      </li>
+      <div class="support-container">
+        <div class="support-list">
+          <h4 class="browser-heading browser--chrome">Chrome</h4>
+          <ol><li class="stat-cell y current" title="x">1-2</li></ol>
+        </div>
+      </div>
+      <script>window.initialFeatData = {{id: "flexbox", data: "{encoded_initial}"}};</script>
+    </body></html>
+    """
+
+    def _fake_aux(_slug: str, data_type: str) -> list[dict[str, str]]:
+        if data_type == "bugs":
+            return [{"description": "Bug one"}, {"description": "Bug two"}]
+        if data_type == "links":
+            return [{"title": "Specification", "url": "https://example.com/spec"}]
+        return []
+
+    monkeypatch.setattr(parse_feature_module, "fetch_feature_aux_data", _fake_aux)
+    monkeypatch.setattr(parse_feature_module, "fetch_support_data", lambda **_kwargs: {})
+
+    full = parse_feature_full(html, slug="flexbox")
+
+    assert full.notes_text == "Initial note text"
+    assert full.known_issues == ["Bug one", "Bug two"]
+    assert full.resources == [("Specification", "https://example.com/spec")]
+    assert full.subfeatures == [("flexbox-gap", "https://caniuse.com/flexbox-gap")]
+    assert full.baseline_status == "high"
+    assert full.baseline_low_date == "2015-09-30"
+    assert full.baseline_high_date == "2018-03-30"
+    assert list(full.tabs.keys()) == ["Notes", "Known issues", "Resources", "Sub-features"]
 
 
 def test_parse_support_range_text_colon_fallback_and_subfeature_filtering() -> None:
