@@ -1,17 +1,17 @@
 # pycaniuse
 
-`pycaniuse` is a Python CLI that queries [caniuse.com](https://caniuse.com) directly from the terminal.
+`pycaniuse` is a Python CLI for querying [caniuse.com](https://caniuse.com) from the terminal.
 
-It performs live HTML fetches and parsing, then renders feature compatibility data in a terminal-friendly format.
+It performs live HTML fetches and parsing, then renders compatibility data in either a quick basic view or an interactive full-screen view.
 
-## What It Does
+## Features
 
-- Resolves a user query to a concrete caniuse feature slug.
-- Fetches feature details from caniuse.com.
-- Shows compatibility support ranges with status icons.
-- Supports two display modes:
-  - Default basic mode for quick output.
-  - `--full` mode for an expanded view with all available browser blocks and sections.
+- Resolves a text query to a feature slug.
+- Fetches live feature data from caniuse.com.
+- Renders browser support ranges with status icons.
+- Provides two display modes:
+  - Basic mode (default): compact output with major browsers.
+  - Full mode (`--full`): full-screen TUI with all browsers and tabbed sections.
 
 ## Requirements
 
@@ -24,7 +24,7 @@ It performs live HTML fetches and parsing, then renders feature compatibility da
 pip install pycaniuse
 ```
 
-After install, the command is available as:
+Verify install:
 
 ```bash
 caniuse --help
@@ -38,40 +38,45 @@ caniuse "css grid"
 caniuse flexbox-gap --full
 ```
 
-## How Query Resolution Works
+## CLI Flow
 
-Every run has two phases:
+Each command run has two phases.
 
 1. Search phase
 - Requests `https://caniuse.com/?search=<query>&static=1`.
-- Parses candidate feature matches.
-- Selection rules:
+- Parses matches from the returned HTML.
+- Selection behavior:
   - No matches: exits non-zero with a friendly message.
   - One match: auto-selects.
   - Exact slug match: auto-selects.
-  - Multiple matches: uses interactive selection in TTY; deterministic first result in non-TTY.
+  - Multiple matches:
+    - Interactive TTY: opens keyboard selector.
+    - Non-interactive: prints a notice and deterministically picks the first match.
 
 2. Feature phase
-- Requests `https://caniuse.com/<slug>?static=1` (with fallback when needed).
+- Requests `https://caniuse.com/<slug>?static=1`.
+- If that response is non-200, retries once without `static=1`.
 - Parses feature metadata and support ranges.
-- Renders output based on selected mode.
+- Renders basic output or full mode UI.
 
 ## Output Modes
 
 ### Basic Mode (default)
 
-Designed for quick checks:
+Shows:
 
 - Feature title
-- Spec URL and status (when available)
-- Global usage percentages (when available)
+- Spec URL and spec status (when present)
+- Global usage percentages (supported, partial, total when present)
 - Description
-- Browser support for:
+- Support ranges for:
   - Chrome
   - Edge
   - Firefox
   - Safari
   - Opera
+- Note marker hints derived from support classes (for example, `See notes: 1`)
+- Hint to run `--full`
 
 Status icons:
 
@@ -82,33 +87,28 @@ Status icons:
 
 ### Full Mode (`--full`)
 
-Shows an expanded interactive TUI, including:
+- Uses a full-screen keyboard-driven TUI when stdin/stdout support it.
+- Falls back to static wrapped output when interactive TUI support is unavailable.
 
-- A feature metadata panel with usage summary.
-- All browser support blocks in a horizontal support table.
-- A selected-browser detail view with range-by-range status rows.
-- Tabbed feature sections for:
-  - Info
-  - Notes (when present)
-  - Resources (when present)
-  - Sub-features (when present)
-  - Legend
-- A dedicated legend and keyboard help footer.
+Current full-screen layout:
+
+- Feature heading panel (title, spec, usage, description preview)
+- Browser support table with horizontal browser tabs
+- Feature detail tabs (`Info` always, then parsed tabs like `Notes`, `Resources`, `Sub-features`, plus `Legend`)
+- Footer with controls and legend
 
 Controls:
 
-- `q` / `Esc`: quit full mode
-- `←` / `→` (or `h` / `l`): move selected browser
-- `↑` / `↓` (or `k` / `j`): scroll selected browser range rows
-- `Tab` / `[` / `]`: switch right-side detail tabs
-- `PgUp` / `PgDn`: scroll tab content
-- `Home` / `End`: jump to top/bottom in detail panes
+- `q` / `Esc`: quit
+- `Left` / `Right` or `h` / `l`: move selected browser
+- `Up` / `Down` or `k` / `j`: scroll ranges for selected browser
+- `Tab` / `Shift+Tab` or `]` / `[`: next/previous detail tab
+- `PgUp` / `PgDn`: page browsers and scroll tab content
+- `Home` / `End`: jump to top/bottom for active browser ranges and tab content
 
-In non-interactive or piped output contexts, full mode falls back to static wrapped rendering.
+## Data Model
 
-## Parser Model
-
-`pycaniuse` uses resilient HTML parsing helpers and returns structured data models:
+Core models in `caniuse/model.py`:
 
 - `SearchMatch`
 - `SupportRange`
@@ -116,32 +116,38 @@ In non-interactive or piped output contexts, full mode falls back to static wrap
 - `FeatureBasic`
 - `FeatureFull`
 
-Primary modules:
+`FeatureBasic` and `FeatureFull` include `parse_warnings` for partial parse cases.
 
-- `caniuse/cli.py`: command orchestration
-- `caniuse/http.py`: HTTP requests and error mapping
-- `caniuse/parse_search.py`: search results parser
-- `caniuse/parse_feature.py`: feature page parser
-- `caniuse/render_basic.py`: basic mode renderer
-- `caniuse/ui/select.py`: interactive selection helpers
-- `caniuse/ui/fullscreen.py`: expanded full-mode renderer
-- `caniuse/util/html.py`: selector/text/attribute helpers
-- `caniuse/util/text.py`: formatting/parsing helpers
+## Key Modules
+
+- `caniuse/cli.py`: CLI orchestration
+- `caniuse/http.py`: HTTP fetches, retries, and fallback behavior
+- `caniuse/parse_search.py`: search HTML parsing
+- `caniuse/parse_feature.py`: feature HTML parsing
+- `caniuse/render_basic.py`: basic output renderer
+- `caniuse/ui/select.py`: interactive match selection
+- `caniuse/ui/fullscreen.py`: full-screen UI and static full fallback
+- `caniuse/util/html.py`: HTML helper utilities
+- `caniuse/util/text.py`: text formatting and parsing helpers
 
 ## Error Handling
 
-Expected operational failures are normalized into domain exceptions and shown as clean CLI errors:
+Expected operational failures are normalized into domain exceptions and surfaced as clean CLI errors.
+
+Examples:
 
 - network connectivity issues
-- timeouts
+- request timeout
 - non-200 responses
-- empty/invalid HTML bodies
+- empty HTML bodies
 
-Parsing is defensive. Missing sections do not crash the CLI; partial output is still rendered with warnings where applicable.
+Parsing is defensive. If browser support parsing fails, CLI output continues with:
+
+`Some sections could not be parsed (site layout may have changed).`
 
 ## Development
 
-### Setup
+Setup:
 
 ```bash
 uv sync --frozen
@@ -149,47 +155,25 @@ uv pip install -e .
 uv run pre-commit install
 ```
 
-Or use:
+Or:
 
 ```bash
 make install
 ```
 
-### Common Commands
+Common commands:
 
 ```bash
-make check       # lockfile + full pre-commit hook suite
-make test        # tox matrix (py310, py311, py312, py313)
-make test-local  # run pytest + HTML coverage report in current env
+make check       # lockfile check + pre-commit hooks
+make test        # tox matrix (py310-py313, excludes canary marker)
+make test-local  # local pytest + HTML coverage report
 make build       # build dist artifacts
 ```
 
-### CI-Parity Details
-
-`make check` runs:
-
-- lockfile validation
-- markdown/style/format checks
-- `ruff`, `black`, `mypy`
-- dependency and security checks (`pip-audit`, `bandit`, `deptry`)
-- spelling/dead-code checks (`codespell`, `vulture`)
-
-`make test` runs `tox` environments across supported Python versions.
-
-## Coverage
-
-Coverage is collected with `pytest-cov` and configured in `pyproject.toml`.
-
-Generate local reports:
+Canary test (live caniuse.com HTML shape):
 
 ```bash
-uv run python -m pytest tests --cov --cov-config=pyproject.toml --cov-report=term-missing
-```
-
-or
-
-```bash
-make test-local
+uv run pytest -m canary
 ```
 
 ## Docker
@@ -201,15 +185,13 @@ docker run --rm -it pycaniuse flexbox
 
 ## Release Utilities
 
-Helpful targets/scripts:
-
 - `make version`
 - `make check-version`
 - `make build`
 - `make check-dist`
 - `make publish-test`
 - `make publish`
-- `make tag` (invokes `scripts/tag_release.sh`)
+- `make tag`
 
 ## Debugging
 
@@ -219,13 +201,13 @@ Set:
 PYCANIUSE_DEBUG=1
 ```
 
-This enables internal debug logging hooks in HTML utilities.
+This enables debug logging hooks in HTML utility helpers.
 
 ## Limitations
 
-- No offline dataset or local cache.
-- Depends on caniuse.com HTML shape.
-- Runtime behavior requires network availability.
+- No local cache or offline dataset.
+- Behavior depends on caniuse.com HTML structure.
+- Network access is required at runtime.
 
 ## License
 
