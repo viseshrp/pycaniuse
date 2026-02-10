@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from typing import Literal, cast
+from typing import Literal
 
 from .constants import BASE_URL, BASIC_MODE_BROWSERS
 from .model import BrowserSupportBlock, FeatureBasic, FeatureFull, SupportRange
@@ -19,7 +19,7 @@ from .util.html import (
 )
 from .util.text import parse_percent
 
-_STATUS_CLASS_ORDER = ("y", "n", "a", "u")
+_STATUS_CLASS_ORDER: tuple[Literal["y", "n", "a", "u"], ...] = ("y", "n", "a", "u")
 
 
 def _parse_title(doc: object, slug: str) -> str:
@@ -97,7 +97,7 @@ def _parse_support_blocks(doc: object, *, include_all: bool) -> list[BrowserSupp
             status: Literal["y", "n", "a", "u"] = "u"
             for token in _STATUS_CLASS_ORDER:
                 if token in classes:
-                    status = cast(Literal["y", "n", "a", "u"], token)
+                    status = token
                     break
 
             range_text = _parse_support_range_text(stat_cell)

@@ -1,4 +1,4 @@
-"""Textual implementation for full-screen feature rendering."""
+"""Textual app for interactive full-screen feature rendering."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from textual.binding import Binding
 from textual.widgets import Static
 
 from ..model import FeatureFull
-from . import fullscreen as legacy
+from . import fullscreen as ui
 
 
 class _FeatureFullApp(App[None]):
@@ -22,17 +22,18 @@ class _FeatureFullApp(App[None]):
         height: 1fr;
     }
     """
+
     BINDINGS: ClassVar[list[Binding]] = [
-        Binding("left", "left", show=False),
-        Binding("right", "right", show=False),
-        Binding("up", "up", show=False),
-        Binding("down", "down", show=False),
-        Binding("pageup", "pageup", show=False),
-        Binding("pagedown", "pagedown", show=False),
+        Binding("left", "prev_browser", show=False),
+        Binding("right", "next_browser", show=False),
+        Binding("up", "scroll_up", show=False),
+        Binding("down", "scroll_down", show=False),
+        Binding("pageup", "page_up", show=False),
+        Binding("pagedown", "page_down", show=False),
         Binding("home", "home", show=False),
         Binding("end", "end", show=False),
-        Binding("tab", "next_tab", show=False),
-        Binding("shift+tab", "prev_tab", show=False),
+        Binding("tab,ctrl+i", "next_tab", show=False, priority=True),
+        Binding("shift+tab,backtab", "prev_tab", show=False, priority=True),
         Binding("left_square_bracket", "prev_tab", show=False),
         Binding("right_square_bracket", "next_tab", show=False),
         Binding("q", "quit_app", show=False),
@@ -42,7 +43,7 @@ class _FeatureFullApp(App[None]):
     def __init__(self, feature: FeatureFull) -> None:
         super().__init__()
         self._feature = feature
-        self._state = legacy._TuiState()
+        self._state = ui._TuiState()
 
     def compose(self) -> ComposeResult:
         yield Static(id="frame")
@@ -56,7 +57,7 @@ class _FeatureFullApp(App[None]):
     def _refresh_frame(self) -> None:
         frame = self.query_one("#frame", Static)
         frame.update(
-            legacy._build_layout_for_size(
+            ui._build_layout_for_size(
                 self._feature,
                 self._state,
                 max(self.size.width, 40),
@@ -64,41 +65,47 @@ class _FeatureFullApp(App[None]):
             )
         )
 
-    def _apply(self, key: legacy._KEY) -> None:
-        if not legacy._apply_key(key, self._state, self._feature):
-            self.exit()
-            return
+    def action_prev_browser(self) -> None:
+        ui._move_browser(self._state, self._feature, -1)
         self._refresh_frame()
 
-    def action_left(self) -> None:
-        self._apply("left")
+    def action_next_browser(self) -> None:
+        ui._move_browser(self._state, self._feature, 1)
+        self._refresh_frame()
 
-    def action_right(self) -> None:
-        self._apply("right")
+    def action_scroll_up(self) -> None:
+        ui._scroll_browser_ranges(self._state, self._feature, -1)
+        self._refresh_frame()
 
-    def action_up(self) -> None:
-        self._apply("up")
+    def action_scroll_down(self) -> None:
+        ui._scroll_browser_ranges(self._state, self._feature, 1)
+        self._refresh_frame()
 
-    def action_down(self) -> None:
-        self._apply("down")
+    def action_page_up(self) -> None:
+        ui._page_browsers(self._state, self._feature, -1)
+        ui._scroll_tab(self._state, self._feature, -5)
+        self._refresh_frame()
 
-    def action_pageup(self) -> None:
-        self._apply("pageup")
-
-    def action_pagedown(self) -> None:
-        self._apply("pagedown")
+    def action_page_down(self) -> None:
+        ui._page_browsers(self._state, self._feature, 1)
+        ui._scroll_tab(self._state, self._feature, 5)
+        self._refresh_frame()
 
     def action_home(self) -> None:
-        self._apply("home")
+        ui._jump_home(self._state)
+        self._refresh_frame()
 
     def action_end(self) -> None:
-        self._apply("end")
+        ui._jump_end(self._state, self._feature)
+        self._refresh_frame()
 
     def action_next_tab(self) -> None:
-        self._apply("next_tab")
+        ui._switch_tab(self._state, self._feature, 1)
+        self._refresh_frame()
 
     def action_prev_tab(self) -> None:
-        self._apply("prev_tab")
+        ui._switch_tab(self._state, self._feature, -1)
+        self._refresh_frame()
 
     def action_quit_app(self) -> None:
         self.exit()

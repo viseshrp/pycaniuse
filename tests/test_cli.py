@@ -172,17 +172,17 @@ def test_full_mode_warning_prints(monkeypatch: MonkeyPatch) -> None:
             tabs={},
         ),
     )
-    called: dict[str, str | None] = {"mode": None}
+    called = {"ran": False}
 
-    def _run_fullscreen(_feature: FeatureFull, *, textual_mode: str = "off") -> None:
-        called["mode"] = textual_mode
+    def _run_fullscreen(_feature: FeatureFull) -> None:
+        called["ran"] = True
 
     monkeypatch.setattr(cli, "run_fullscreen", _run_fullscreen)
 
     result = runner.invoke(cli.main, ["flexbox", "--full"])
     assert result.exit_code == 0
     assert "Some sections could not be parsed" in result.output
-    assert called["mode"] == "auto"
+    assert called["ran"] is True
 
 
 def test_multiple_matches_tty_path_skips_non_interactive_notice(monkeypatch: MonkeyPatch) -> None:
@@ -362,12 +362,100 @@ def test_tui_mode_forces_textual(monkeypatch: MonkeyPatch) -> None:
             tabs={},
         ),
     )
-    calls: dict[str, str | None] = {"mode": None}
+    calls = {"ran": False}
 
-    def _run_fullscreen(_feature: FeatureFull, *, textual_mode: str = "off") -> None:
-        calls["mode"] = textual_mode
+    def _run_fullscreen(_feature: FeatureFull) -> None:
+        calls["ran"] = True
 
     monkeypatch.setattr(cli, "run_fullscreen", _run_fullscreen)
     result = runner.invoke(cli.main, ["flexbox", "--tui"])
     assert result.exit_code == 0
-    assert calls["mode"] == "force"
+    assert calls["ran"] is True
+
+
+def test_multiple_matches_non_interactive_notice(monkeypatch: MonkeyPatch) -> None:
+    runner = CliRunner()
+
+    monkeypatch.setattr(cli, "fetch_search_page", lambda _query: "search")
+    monkeypatch.setattr(
+        cli,
+        "parse_search_results",
+        lambda _html: [
+            SearchMatch(slug="flexbox", title="Flexbox", href="/flexbox"),
+            SearchMatch(slug="grid", title="Grid", href="/grid"),
+        ],
+    )
+    monkeypatch.setattr(cli, "fetch_feature_page", lambda _slug: "feature")
+    monkeypatch.setattr(
+        cli,
+        "parse_feature_basic",
+        lambda _html, slug: FeatureBasic(
+            slug=slug,
+            title="Grid",
+            spec_url=None,
+            spec_status=None,
+            usage_supported=None,
+            usage_partial=None,
+            usage_total=None,
+            description_text="",
+            browser_blocks=[],
+            parse_warnings=[],
+        ),
+    )
+    monkeypatch.setattr(cli, "render_basic", lambda feature_basic: feature_basic.title)
+    monkeypatch.setattr(cli, "select_match", lambda matches: matches[0].slug)
+
+    result = runner.invoke(cli.main, ["css"])
+    assert result.exit_code == 0
+    assert "Multiple matches found in non-interactive mode." in result.output
+
+
+def test_selection_canceled_exits(monkeypatch: MonkeyPatch) -> None:
+    runner = CliRunner()
+    monkeypatch.setattr(cli, "fetch_search_page", lambda _query: "search")
+    monkeypatch.setattr(
+        cli,
+        "parse_search_results",
+        lambda _html: [
+            SearchMatch(slug="flexbox", title="Flexbox", href="/flexbox"),
+            SearchMatch(slug="grid", title="Grid", href="/grid"),
+        ],
+    )
+    monkeypatch.setattr(cli, "select_match", lambda _matches: None)
+
+    result = runner.invoke(cli.main, ["css"])
+    assert result.exit_code != 0
+    assert "Selection canceled." in result.output
+
+
+def test_basic_mode_warning_prints(monkeypatch: MonkeyPatch) -> None:
+    runner = CliRunner()
+
+    monkeypatch.setattr(cli, "fetch_search_page", lambda _query: "search")
+    monkeypatch.setattr(
+        cli,
+        "parse_search_results",
+        lambda _html: [SearchMatch(slug="flexbox", title="Flexbox", href="/flexbox")],
+    )
+    monkeypatch.setattr(cli, "fetch_feature_page", lambda _slug: "feature")
+    monkeypatch.setattr(
+        cli,
+        "parse_feature_basic",
+        lambda _html, slug: FeatureBasic(
+            slug=slug,
+            title="Flexbox",
+            spec_url=None,
+            spec_status=None,
+            usage_supported=None,
+            usage_partial=None,
+            usage_total=None,
+            description_text="",
+            browser_blocks=[],
+            parse_warnings=["usage"],
+        ),
+    )
+    monkeypatch.setattr(cli, "render_basic", lambda feature_basic: feature_basic.title)
+
+    result = runner.invoke(cli.main, ["flexbox"])
+    assert result.exit_code == 0
+    assert "Some sections could not be parsed" in result.output

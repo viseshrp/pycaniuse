@@ -1,44 +1,21 @@
-"""Full-screen interactive UI for --full mode."""
+"""Rich render helpers and fullscreen orchestration for full feature output."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
-import os
-import re
-import select
 import sys
 import textwrap
-from typing import Any, Literal, cast
 
 from rich.console import Console, Group
 from rich.layout import Layout
-from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 
 from ..constants import STATUS_ICON_MAP, STATUS_LABEL_MAP
-from ..model import BrowserSupportBlock, FeatureFull, SupportRange
+from ..model import FeatureFull, SupportRange
 from ..util.text import extract_note_markers
 
 _BROWSER_TAB_WIDTH = 16
-_KEY = Literal[
-    "up",
-    "down",
-    "left",
-    "right",
-    "pageup",
-    "pagedown",
-    "home",
-    "end",
-    "tab",
-    "shift_tab",
-    "next_tab",
-    "prev_tab",
-    "quit",
-    "noop",
-]
-_TEXTUAL_MODE = Literal["off", "auto", "force"]
 _STATUS_STYLE_MAP = {
     "y": "black on green3",
     "n": "white on red3",
@@ -50,10 +27,6 @@ _ERA_STYLE_MAP = {
     "current": "bold cyan",
     "future": "magenta",
 }
-_GLOBAL_USAGE_RE = re.compile(r"Global usage:\s*([0-9]+(?:\.[0-9]+)?)%")
-_LINK_TOKEN_RE = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)|(https?://[^\s)]+)")
-_TEXTUAL_FLAG_ENV = "PYCANIUSE_TEXTUAL_FULL"
-_ENABLED_VALUES = frozenset({"1", "true", "yes", "on"})
 
 
 @dataclass
@@ -206,41 +179,40 @@ def _era_label(support_range: SupportRange) -> str:
 
 
 def _extract_global_usage(title_attr: str) -> str | None:
-    if not title_attr:
+    marker = "Global usage:"
+    if marker not in title_attr:
         return None
-    match = _GLOBAL_USAGE_RE.search(title_attr)
-    if not match:
+    usage = title_attr.split(marker, maxsplit=1)[1].strip()
+    if not usage:
         return None
-    return f"{match.group(1)}%"
+    first_token = usage.split(maxsplit=1)[0]
+    return first_token if first_token.endswith("%") else None
 
 
 def _linkify_line(value: str, *, base_style: str | None = None) -> Text:
     text = Text()
-    cursor = 0
-    for match in _LINK_TOKEN_RE.finditer(value):
-        start, end = match.span()
-        if start > cursor:
-            text.append(value[cursor:start], style=base_style)
+    tokens = value.split()
+    for index, token in enumerate(tokens):
+        rendered = token
+        style = base_style
 
-        markdown_label = match.group(1)
-        markdown_url = match.group(2)
-        bare_url = match.group(3)
-        label = markdown_label or bare_url or ""
-        url = markdown_url or bare_url or ""
-        if label and url:
-            style = "underline cyan"
-            if base_style:
-                style = f"{base_style} {style}"
+        if token.startswith("http://") or token.startswith("https://"):
+            rendered = token
+            style = "underline cyan" if not base_style else f"{base_style} underline cyan"
+            text.append(rendered, style=f"{style} link {token}")
+        elif token.startswith("[") and "](" in token and token.endswith(")"):
+            label, rest = token[1:].split("](", maxsplit=1)
+            url = rest[:-1]
+            style = "underline cyan" if not base_style else f"{base_style} underline cyan"
             text.append(label, style=f"{style} link {url}")
+        else:
+            text.append(rendered, style=base_style)
 
-        cursor = end
+        if index != len(tokens) - 1:
+            text.append(" ", style=base_style)
 
-    if cursor < len(value):
-        text.append(value[cursor:], style=base_style)
-    if not text.plain:
-        if base_style:
-            return Text(value, style=base_style)
-        return Text(value)
+    if not tokens:
+        return Text(value, style=base_style or "")
     return text
 
 
@@ -318,6 +290,7 @@ def _support_overview_panel(
 
     preview_size = max(max_rows - 5, 2)
     visible_ranges = selected.ranges[state.range_scroll : state.range_scroll + preview_size]
+
     rows: list[Text] = []
     for support_range in visible_ranges:
         rows.append(_format_support_line(support_range, include_usage=False))
@@ -340,40 +313,6 @@ def _support_overview_panel(
         title="Support Table",
         border_style="green",
     )
-
-
-def _selected_browser(feature: FeatureFull, state: _TuiState) -> BrowserSupportBlock | None:
-    if not feature.browser_blocks:
-        return None
-    idx = max(0, min(state.selected_browser, len(feature.browser_blocks) - 1))
-    return feature.browser_blocks[idx]
-
-
-def _support_detail_panel(feature: FeatureFull, state: _TuiState, max_rows: int) -> Panel:
-    selected = _selected_browser(feature, state)
-    if selected is None:
-        return Panel(Text("No browser selected."), title="Browser Details", border_style="red")
-    range_count = len(selected.ranges)
-    if range_count == 0:
-        return Panel(Text("No support ranges."), title=selected.browser_name, border_style="cyan")
-
-    state.range_scroll = max(0, min(state.range_scroll, range_count - 1))
-    visible_count = max(max_rows - 3, 4)
-    visible = selected.ranges[state.range_scroll : state.range_scroll + visible_count]
-
-    rows: list[Text] = []
-    for support_range in visible:
-        rows.append(_format_support_line(support_range, include_usage=True))
-
-    position = f"Rows {state.range_scroll + 1}-{state.range_scroll + len(visible)} of {range_count}"
-    rows.extend(
-        [
-            Text(""),
-            Text(position, style="dim"),
-            Text("↑/↓ scroll selected browser ranges", style="dim"),
-        ]
-    )
-    return Panel(Group(*rows), title=f"{selected.browser_name} Support", border_style="cyan")
 
 
 def _tab_panel(feature: FeatureFull, state: _TuiState, max_rows: int) -> Panel:
@@ -466,12 +405,84 @@ def _footer_panel() -> Panel:
     return Panel(Group(controls, legend), border_style="grey50")
 
 
+def _normalize_state(state: _TuiState, feature: FeatureFull) -> None:
+    browser_count = len(feature.browser_blocks)
+    if browser_count == 0:
+        state.selected_browser = 0
+        state.browser_offset = 0
+        state.range_scroll = 0
+    else:
+        state.selected_browser = max(0, min(state.selected_browser, browser_count - 1))
+        max_range = max(len(feature.browser_blocks[state.selected_browser].ranges) - 1, 0)
+        state.range_scroll = max(0, min(state.range_scroll, max_range))
+
+    sections = _tab_sections(feature)
+    state.tab_index = max(0, min(state.tab_index, len(sections) - 1))
+    active_lines = sections[state.tab_index][1]
+    state.tab_scroll = max(0, min(state.tab_scroll, max(len(active_lines) - 1, 0)))
+
+
+def _move_browser(state: _TuiState, feature: FeatureFull, delta: int) -> None:
+    if not feature.browser_blocks:
+        return
+    state.selected_browser = max(
+        0, min(state.selected_browser + delta, len(feature.browser_blocks) - 1)
+    )
+    state.range_scroll = 0
+
+
+def _scroll_browser_ranges(state: _TuiState, feature: FeatureFull, delta: int) -> None:
+    if not feature.browser_blocks:
+        return
+    ranges = feature.browser_blocks[state.selected_browser].ranges
+    max_range = max(len(ranges) - 1, 0)
+    state.range_scroll = max(0, min(state.range_scroll + delta, max_range))
+
+
+def _switch_tab(state: _TuiState, feature: FeatureFull, delta: int) -> None:
+    sections = _tab_sections(feature)
+    if not sections:
+        return
+    state.tab_index = (state.tab_index + delta) % len(sections)
+    state.tab_scroll = 0
+
+
+def _scroll_tab(state: _TuiState, feature: FeatureFull, delta: int) -> None:
+    sections = _tab_sections(feature)
+    active_lines = sections[state.tab_index][1]
+    max_scroll = max(len(active_lines) - 1, 0)
+    state.tab_scroll = max(0, min(state.tab_scroll + delta, max_scroll))
+
+
+def _page_browsers(state: _TuiState, feature: FeatureFull, direction: int) -> None:
+    if not feature.browser_blocks:
+        return
+    step = max(state.browser_visible_count, 1)
+    _move_browser(state, feature, direction * step)
+
+
+def _jump_home(state: _TuiState) -> None:
+    state.range_scroll = 0
+    state.tab_scroll = 0
+
+
+def _jump_end(state: _TuiState, feature: FeatureFull) -> None:
+    if feature.browser_blocks:
+        selected = feature.browser_blocks[state.selected_browser]
+        state.range_scroll = max(len(selected.ranges) - 1, 0)
+    sections = _tab_sections(feature)
+    active_lines = sections[state.tab_index][1]
+    state.tab_scroll = max(len(active_lines) - 1, 0)
+
+
 def _build_layout_for_size(
     feature: FeatureFull,
     state: _TuiState,
     width: int,
     height: int,
 ) -> Layout:
+    _normalize_state(state, feature)
+
     root = Layout()
     footer_size = 4
     feature_size = 10 if height >= 32 else 8
@@ -499,250 +510,19 @@ def _build_layout(feature: FeatureFull, state: _TuiState, console: Console) -> L
     return _build_layout_for_size(feature, state, console.size.width, console.size.height)
 
 
-def _decode_escape_sequence(sequence: bytes) -> _KEY:
-    normalized = sequence.replace(b"O", b"[")
-    if normalized.endswith(b"A"):
-        return "up"
-    if normalized.endswith(b"B"):
-        return "down"
-    if normalized.endswith(b"C"):
-        return "right"
-    if normalized.endswith(b"D"):
-        return "left"
-    if normalized.startswith(b"[5") and normalized.endswith(b"~"):
-        return "pageup"
-    if normalized.startswith(b"[6") and normalized.endswith(b"~"):
-        return "pagedown"
-    if normalized.endswith(b"H"):
-        return "home"
-    if normalized.endswith(b"F"):
-        return "end"
-    if normalized.endswith(b"Z"):
-        return "shift_tab"
-    return "noop"
-
-
-def _read_key_posix(fd: int) -> _KEY:
-    data = os.read(fd, 1)
-    if not data:
-        return "noop"
-
-    char = data.decode(errors="ignore")
-    if char in {"q", "Q"}:
-        return "quit"
-    if char == "\t":
-        return "tab"
-    if char in {"\r", "\n"}:
-        return "noop"
-    if char in {"[", "]"}:
-        return "prev_tab" if char == "[" else "next_tab"
-    if char in {"\x1b"}:
-        sequence = b""
-        while select.select([fd], [], [], 0.01)[0]:
-            sequence += os.read(fd, 1)
-            if sequence.endswith((b"A", b"B", b"C", b"D", b"~", b"Z", b"H", b"F")):
-                break
-        if not sequence:
-            return "quit"
-        return _decode_escape_sequence(sequence)
-    if char.lower() == "h":
-        return "left"
-    if char.lower() == "j":
-        return "down"
-    if char.lower() == "k":
-        return "up"
-    if char.lower() == "l":
-        return "right"
-    return "noop"
-
-
-def _read_key_windows() -> _KEY:
-    import msvcrt  # pragma: no cover
-
-    getwch = cast(Callable[[], str] | None, getattr(msvcrt, "getwch", None))
-    if getwch is None:
-        return "noop"
-
-    char = getwch()
-    if char in {"q", "Q", "\x1b"}:
-        return "quit"
-    if char == "\t":
-        return "tab"
-    if char == "[":
-        return "prev_tab"
-    if char == "]":
-        return "next_tab"
-    if char in {"h", "H"}:
-        return "left"
-    if char in {"j", "J"}:
-        return "down"
-    if char in {"k", "K"}:
-        return "up"
-    if char in {"l", "L"}:
-        return "right"
-
-    if char in {"\x00", "\xe0"}:
-        special = getwch()
-        mapping: dict[str, _KEY] = {
-            "H": "up",
-            "P": "down",
-            "K": "left",
-            "M": "right",
-            "I": "pageup",
-            "Q": "pagedown",
-            "G": "home",
-            "O": "end",
-        }
-        return mapping.get(special, "noop")
-    return "noop"
-
-
-class _RawInput:
-    def __init__(self) -> None:
-        self._fd: int | None = None
-        self._old_settings: Any = None
-
-    def __enter__(self) -> _RawInput:
-        if os.name == "nt":
-            return self
-        import termios
-        import tty
-
-        self._fd = sys.stdin.fileno()
-        self._old_settings = termios.tcgetattr(self._fd)
-        tty.setcbreak(self._fd)
-        return self
-
-    def __exit__(
-        self,
-        _exc_type: type[BaseException] | None,
-        _exc: BaseException | None,
-        _tb: object | None,
-    ) -> None:
-        if os.name == "nt":
-            return
-        if self._fd is None or self._old_settings is None:
-            return
-        import termios
-
-        termios.tcsetattr(self._fd, termios.TCSADRAIN, self._old_settings)
-
-    def read_key(self) -> _KEY:
-        if os.name == "nt":
-            return _read_key_windows()
-        if self._fd is None:
-            return "noop"
-        return _read_key_posix(self._fd)
-
-
-def _supports_tui(console: Console) -> bool:
-    if not (sys.stdin.isatty() and sys.stdout.isatty()):
-        return False
-    if not hasattr(console, "screen"):
-        return False
-    if not hasattr(sys.stdin, "fileno") or not hasattr(sys.stdin, "read"):
-        return False
-    try:
-        sys.stdin.fileno()
-    except (OSError, ValueError):
-        return False
-    return True
-
-
-def _textual_feature_enabled() -> bool:
-    value = os.getenv(_TEXTUAL_FLAG_ENV, "")
-    return value.strip().lower() in _ENABLED_VALUES
-
-
-def _try_run_textual_tui(feature: FeatureFull) -> bool:
-    try:
-        from .textual_fullscreen import run_textual_fullscreen
-    except ImportError:
-        return False
-
-    run_textual_fullscreen(feature)
-    return True
-
-
-def _apply_key(key: _KEY, state: _TuiState, feature: FeatureFull) -> bool:
-    browser_count = len(feature.browser_blocks)
-    if key == "quit":
-        return False
-    if key in {"left"} and browser_count:
-        state.selected_browser = max(0, state.selected_browser - 1)
-        state.range_scroll = 0
-    elif key in {"right"} and browser_count:
-        state.selected_browser = min(browser_count - 1, state.selected_browser + 1)
-        state.range_scroll = 0
-    elif key in {"up"} and browser_count:
-        state.range_scroll = max(state.range_scroll - 1, 0)
-    elif key in {"down"} and browser_count:
-        selected = feature.browser_blocks[state.selected_browser]
-        state.range_scroll = min(state.range_scroll + 1, max(len(selected.ranges) - 1, 0))
-    elif key in {"tab", "next_tab"}:
-        section_count = len(_tab_sections(feature))
-        state.tab_index = (state.tab_index + 1) % section_count
-        state.tab_scroll = 0
-    elif key in {"shift_tab", "prev_tab"}:
-        section_count = len(_tab_sections(feature))
-        state.tab_index = (state.tab_index - 1) % section_count
-        state.tab_scroll = 0
-    elif key == "pageup":
-        if browser_count:
-            step = max(state.browser_visible_count, 1)
-            state.selected_browser = max(state.selected_browser - step, 0)
-            state.range_scroll = 0
-        state.tab_scroll = max(state.tab_scroll - 5, 0)
-    elif key == "pagedown":
-        if browser_count:
-            step = max(state.browser_visible_count, 1)
-            state.selected_browser = min(state.selected_browser + step, browser_count - 1)
-            state.range_scroll = 0
-        active_lines = _tab_sections(feature)[state.tab_index][1]
-        state.tab_scroll = min(state.tab_scroll + 5, max(len(active_lines) - 1, 0))
-    elif key == "home":
-        state.range_scroll = 0
-        state.tab_scroll = 0
-    elif key == "end":
-        if browser_count:
-            selected = feature.browser_blocks[state.selected_browser]
-            state.range_scroll = max(len(selected.ranges) - 1, 0)
-        active_lines = _tab_sections(feature)[state.tab_index][1]
-        state.tab_scroll = max(len(active_lines) - 1, 0)
-    return True
-
-
-def _run_tui(console: Console, feature: FeatureFull) -> None:
-    state = _TuiState()
-    with (
-        _RawInput() as raw,
-        console.screen(hide_cursor=True),
-        Live(
-            _build_layout(feature, state, console),
-            console=console,
-            auto_refresh=False,
-            screen=True,
-        ) as live,
-    ):
-        while True:
-            live.update(_build_layout(feature, state, console), refresh=True)
-            key = raw.read_key()
-            if not _apply_key(key, state, feature):
-                break
-
-
-def run_fullscreen(feature: FeatureFull, *, textual_mode: _TEXTUAL_MODE = "off") -> None:
-    """Render full mode as interactive TUI when supported; otherwise print static output."""
-    console = Console()
-    if sys.stdout.isatty() and textual_mode != "off":
-        should_try_textual = textual_mode == "force" or _textual_feature_enabled()
-        if should_try_textual and _try_run_textual_tui(feature):
-            return
-
-    if _supports_tui(console):
-        _run_tui(console, feature)
-        return
-
+def _print_static(console: Console, feature: FeatureFull) -> None:
     lines = _render_lines(feature, console.size.width - 6)
     renderable = Panel(Text("\n".join(lines)), title=f"/{feature.slug}", border_style="blue")
     console.print(renderable)
+
+
+def run_fullscreen(feature: FeatureFull) -> None:
+    """Render full output with Textual in TTY mode and static Rich output otherwise."""
+    console = Console()
+    if sys.stdout.isatty():
+        from .textual_fullscreen import run_textual_fullscreen
+
+        run_textual_fullscreen(feature)
+        return
+
+    _print_static(console, feature)
