@@ -38,9 +38,9 @@ def test_caniuse_feature_page_html_shape_is_parseable_live() -> None:
 
     search_matches = parse_search_results(search_html)
     assert search_matches, "Search parser returned no matches."
-    assert any(
-        match.slug == slug for match in search_matches
-    ), "Expected slug was not returned by search."
+    assert any(match.slug == slug for match in search_matches), (
+        "Expected slug was not returned by search."
+    )
 
     feature_html = fetch_feature_page(slug)
     assert "<html" in feature_html.lower()
@@ -98,9 +98,9 @@ def test_caniuse_feature_page_html_shape_is_parseable_live() -> None:
         any(status_class in {"y", "n", "a", "u"} for status_class in class_tokens(stat_cell))
         for stat_cell in all_stat_cells
     ), "No support status class token found in any stat cell."
-    assert any(
-        attr(stat_cell, "title") for stat_cell in all_stat_cells
-    ), "No stat cell had a title attribute."
+    assert any(attr(stat_cell, "title") for stat_cell in all_stat_cells), (
+        "No stat cell had a title attribute."
+    )
     assert any(text(stat_cell) for stat_cell in all_stat_cells), "No stat cell contained text."
     assert any(
         any(

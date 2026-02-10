@@ -404,7 +404,7 @@ def _build_mdn_attribution_note(initial_data: dict[str, object] | None) -> str |
         lines.append(f"MDN reference: {mdn_url.strip()}")
     if isinstance(path, str) and path.strip():
         lines.append(
-            "Source data: " f"https://github.com/mdn/browser-compat-data/blob/main/{path.strip()}"
+            f"Source data: https://github.com/mdn/browser-compat-data/blob/main/{path.strip()}"
         )
     return "\n".join(lines) if lines else None
 
