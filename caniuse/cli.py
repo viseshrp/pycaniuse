@@ -21,11 +21,8 @@ from .ui.select import select_match
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
 @click.argument("query", nargs=-1, required=True)
 @click.option("--full", "full_mode", is_flag=True, help="Enable full-screen interactive mode.")
-@click.option(
-    "--tui", "tui_mode", is_flag=True, help="Enable Textual interactive full-screen mode."
-)
 @click.version_option(_version, "-v", "--version")
-def main(query: tuple[str, ...], full_mode: bool, tui_mode: bool) -> None:
+def main(query: tuple[str, ...], full_mode: bool) -> None:
     """Query caniuse.com from the terminal."""
     query_text = " ".join(query).strip()
     console = Console()
@@ -65,7 +62,7 @@ def main(query: tuple[str, ...], full_mode: bool, tui_mode: bool) -> None:
 
             feature_html = fetch_feature_page(slug)
 
-            if full_mode or tui_mode:
+            if full_mode:
                 feature_full = parse_feature_full(feature_html, slug)
                 if feature_full.parse_warnings:
                     console.print(PARSE_WARNING_LINE, style="yellow")

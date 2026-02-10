@@ -234,7 +234,7 @@ def test_multiple_matches_tty_path_skips_non_interactive_notice(monkeypatch: Mon
 
     callback = cli.main.callback
     assert callback is not None
-    callback(query=("g",), full_mode=False, tui_mode=False)
+    callback(query=("g",), full_mode=False)
 
     rendered = "\n".join(str(item) for item in fake_console.printed)
     assert "Grid" in rendered
@@ -332,45 +332,11 @@ def test_cli_error_path_still_exits_shared_client_context(monkeypatch: MonkeyPat
     assert state["exited"] == 1
 
 
-def test_tui_mode_forces_textual(monkeypatch: MonkeyPatch) -> None:
+def test_tui_flag_removed() -> None:
     runner = CliRunner()
-
-    monkeypatch.setattr(cli, "fetch_search_page", lambda query: "search")
-    monkeypatch.setattr(
-        cli,
-        "parse_search_results",
-        lambda html: [SearchMatch(slug="flexbox", title="Flexbox", href="/flexbox")],
-    )
-    monkeypatch.setattr(cli, "fetch_feature_page", lambda slug: "feature")
-    monkeypatch.setattr(
-        cli,
-        "parse_feature_full",
-        lambda html, slug: FeatureFull(
-            slug=slug,
-            title="Flexbox",
-            spec_url=None,
-            spec_status=None,
-            usage_supported=None,
-            usage_partial=None,
-            usage_total=None,
-            description_text="desc",
-            browser_blocks=[],
-            parse_warnings=[],
-            notes_text=None,
-            resources=[],
-            subfeatures=[],
-            tabs={},
-        ),
-    )
-    calls = {"ran": False}
-
-    def _run_fullscreen(_feature: FeatureFull) -> None:
-        calls["ran"] = True
-
-    monkeypatch.setattr(cli, "run_fullscreen", _run_fullscreen)
     result = runner.invoke(cli.main, ["flexbox", "--tui"])
-    assert result.exit_code == 0
-    assert calls["ran"] is True
+    assert result.exit_code != 0
+    assert "No such option: --tui" in result.output
 
 
 def test_multiple_matches_non_interactive_notice(monkeypatch: MonkeyPatch) -> None:

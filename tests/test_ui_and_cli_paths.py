@@ -9,7 +9,6 @@ from caniuse.model import BrowserSupportBlock, FeatureFull, SearchMatch, Support
 from caniuse.ui import fullscreen as fs
 from caniuse.ui import select as ui_select
 from caniuse.ui import textual_fullscreen as tui_full
-from caniuse.ui import textual_select as tui_select
 
 
 class _FakeInOut:
@@ -91,22 +90,25 @@ def test_select_match_paths(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(ui_select.sys, "stdin", _FakeInOut(True))
     monkeypatch.setattr(ui_select.sys, "stdout", _FakeInOut(True))
-    monkeypatch.setattr(ui_select, "run_textual_select", lambda _m: "b")
+    monkeypatch.setattr(ui_select, "Console", lambda: _FakeConsole())
+    answers = iter(["2"])
+    monkeypatch.setattr(ui_select.Prompt, "ask", lambda *_a, **_k: next(answers))
     assert ui_select.select_match(matches) == "b"
 
 
-def test_textual_select_runner_delegates(monkeypatch: pytest.MonkeyPatch) -> None:
-    matches = [SearchMatch(slug="a", title="A", href="/a")]
+def test_select_match_retries_and_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
+    matches = [
+        SearchMatch(slug="a", title="A", href="/a"),
+        SearchMatch(slug="b", title="B", href="/b"),
+    ]
 
-    class _FakeApp:
-        def __init__(self, _matches: list[SearchMatch]) -> None:
-            self.selection = "a"
+    monkeypatch.setattr(ui_select.sys, "stdin", _FakeInOut(True))
+    monkeypatch.setattr(ui_select.sys, "stdout", _FakeInOut(True))
+    monkeypatch.setattr(ui_select, "Console", lambda: _FakeConsole())
 
-        def run(self) -> None:
-            return None
-
-    monkeypatch.setattr(tui_select, "_SelectMatchApp", _FakeApp)
-    assert tui_select.run_textual_select(matches) == "a"
+    prompts = iter(["bad", "q"])
+    monkeypatch.setattr(ui_select.Prompt, "ask", lambda *_a, **_k: next(prompts))
+    assert ui_select.select_match(matches) is None
 
 
 def test_fullscreen_static_and_tty_paths(monkeypatch: pytest.MonkeyPatch) -> None:
