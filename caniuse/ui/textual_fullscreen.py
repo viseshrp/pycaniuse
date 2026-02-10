@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import ClassVar
 
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.widgets import Static
 
 from ..model import FeatureFull
@@ -21,21 +22,21 @@ class _FeatureFullApp(App[None]):
         height: 1fr;
     }
     """
-    BINDINGS: ClassVar[list[tuple[str, str, str, bool]]] = [
-        ("left", "left", "", False),
-        ("right", "right", "", False),
-        ("up", "up", "", False),
-        ("down", "down", "", False),
-        ("pageup", "pageup", "", False),
-        ("pagedown", "pagedown", "", False),
-        ("home", "home", "", False),
-        ("end", "end", "", False),
-        ("tab", "next_tab", "", False),
-        ("shift+tab", "prev_tab", "", False),
-        ("left_square_bracket", "prev_tab", "", False),
-        ("right_square_bracket", "next_tab", "", False),
-        ("q", "quit_app", "", False),
-        ("escape", "quit_app", "", False),
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("left", "left", show=False),
+        Binding("right", "right", show=False),
+        Binding("up", "up", show=False),
+        Binding("down", "down", show=False),
+        Binding("pageup", "pageup", show=False),
+        Binding("pagedown", "pagedown", show=False),
+        Binding("home", "home", show=False),
+        Binding("end", "end", show=False),
+        Binding("tab", "next_tab", show=False),
+        Binding("shift+tab", "prev_tab", show=False),
+        Binding("left_square_bracket", "prev_tab", show=False),
+        Binding("right_square_bracket", "next_tab", show=False),
+        Binding("q", "quit_app", show=False),
+        Binding("escape", "quit_app", show=False),
     ]
 
     def __init__(self, feature: FeatureFull) -> None:

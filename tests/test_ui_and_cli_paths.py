@@ -15,6 +15,7 @@ from caniuse.exceptions import CaniuseError
 from caniuse.model import BrowserSupportBlock, FeatureBasic, FeatureFull, SearchMatch, SupportRange
 from caniuse.ui import fullscreen as fs
 from caniuse.ui import select as ui_select
+from caniuse.ui.textual_fullscreen import _FeatureFullApp
 
 
 class _FakePager:
@@ -351,6 +352,12 @@ def test_fullscreen_textual_force_uses_textual_when_tty(
 
     fs.run_fullscreen(feature, textual_mode="force")
     assert called["textual"] is True
+
+
+def test_textual_app_class_loads_and_binds() -> None:
+    app = _FeatureFullApp(_sample_feature_full())
+    assert app is not None
+    assert app.BINDINGS
 
 
 def test_fullscreen_textual_auto_flag_and_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
