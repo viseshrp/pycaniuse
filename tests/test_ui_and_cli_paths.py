@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import builtins
-from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -194,17 +193,15 @@ def test_fullscreen_render_helpers_cover_core_paths() -> None:
     assert fs._support_lines(feature)
     lines = fs._feature_lines(feature)
     assert "Browser Support" in lines
+    assert "Notes" not in lines
     assert fs._render_lines(feature, 50)
 
     sections = fs._tab_sections(feature)
-    assert sections[0][0] == "Notes"
-    assert any(name == "Notes" for name, _ in sections)
+    assert sections[0][0] == "Resources"
+    assert all(name != "Notes" for name, _ in sections)
 
     no_tabs_sections = fs._tab_sections(_sample_feature_full(with_tabs=False))
     assert any(name == "Resources" for name, _ in no_tabs_sections)
-
-    no_baseline_feature = replace(_sample_feature_full(with_tabs=True), baseline_status="unknown")
-    assert fs._baseline_summary(no_baseline_feature) is None
 
 
 def test_fullscreen_link_and_usage_parsing() -> None:
@@ -224,7 +221,7 @@ def test_fullscreen_link_and_usage_parsing() -> None:
 
 
 def test_fullscreen_state_and_navigation_helpers() -> None:
-    feature = _sample_feature_full(browser_count=3)
+    feature = _sample_feature_full(with_tabs=False, browser_count=3)
     state = fs._TuiState()
 
     fs._normalize_state(state, feature)
