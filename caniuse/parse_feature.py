@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import OrderedDict
 import json
 import re
-from typing import Literal
+from typing import Literal, cast
 
 from .constants import BASE_URL, BASIC_MODE_BROWSERS
 from .exceptions import CaniuseError
@@ -228,11 +228,12 @@ def _parse_baseline_fields(data: dict[str, object]) -> tuple[str | None, str | N
         baseline = data.get("baselineStatus")
     if not isinstance(baseline, dict):
         return None, None, None
+    baseline_map = cast(dict[str, object], baseline)
 
-    raw_status = baseline.get("status")
+    raw_status = baseline_map.get("status")
     status = raw_status.strip().lower() if isinstance(raw_status, str) else None
-    low_date = _clean_date(baseline.get("lowDate") or baseline.get("low_date"))
-    high_date = _clean_date(baseline.get("highDate") or baseline.get("high_date"))
+    low_date = _clean_date(baseline_map.get("lowDate") or baseline_map.get("low_date"))
+    high_date = _clean_date(baseline_map.get("highDate") or baseline_map.get("high_date"))
     return status, low_date, high_date
 
 
@@ -247,13 +248,14 @@ def _parse_baseline_from_metadata(
     for item in meta_data:
         if not isinstance(item, dict):
             continue
-        item_id = item.get("id")
+        item_map = cast(dict[str, object], item)
+        item_id = item_map.get("id")
         if not isinstance(item_id, str) or item_id.strip().lower() != slug:
             continue
-        raw_status = item.get("baselineStatus")
+        raw_status = item_map.get("baselineStatus")
         status = raw_status.strip().lower() if isinstance(raw_status, str) else None
-        low_date = _clean_date(item.get("baselineLowDate"))
-        high_date = _clean_date(item.get("baselineHighDate"))
+        low_date = _clean_date(item_map.get("baselineLowDate"))
+        high_date = _clean_date(item_map.get("baselineHighDate"))
         return status, low_date, high_date
 
     return None, None, None
@@ -299,10 +301,11 @@ def _parse_subfeatures_from_initial_data(data: dict[str, object]) -> list[tuple[
         if isinstance(item, str):
             feature_id = item.strip().lower()
         elif isinstance(item, dict):
-            raw_id = item.get("id")
+            item_map = cast(dict[str, object], item)
+            raw_id = item_map.get("id")
             if isinstance(raw_id, str):
                 feature_id = raw_id.strip().lower()
-            raw_title = item.get("title")
+            raw_title = item_map.get("title")
             if isinstance(raw_title, str):
                 title = raw_title.strip()
 
