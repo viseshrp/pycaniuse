@@ -11,7 +11,11 @@ endif
 .PHONY: install
 install: ## 🚀 Set up environment and install project
 	@echo "🚀 Syncing dependencies with uv..."
-	uv sync --frozen
+	@if [ -f uv.lock ]; then \
+		uv sync --frozen; \
+	else \
+		uv sync; \
+	fi
 	@echo "🔧 Installing project in editable mode..."
 	uv pip install -e .
 
@@ -28,7 +32,11 @@ check-version:
 .PHONY: check
 check: ## Run all code quality checks
 	@echo "🚀 Checking lock file consistency"
-	uv lock --locked
+	@if [ -f uv.lock ]; then \
+		uv lock --locked; \
+	else \
+		uv lock; \
+	fi
 	@echo "🚀 Running pre-commit hooks"
 	uv run pre-commit run --all-files
 

@@ -1,6 +1,14 @@
 # pycaniuse
 
 `pycaniuse` is a Python CLI for querying [caniuse.com](https://caniuse.com) from the terminal.
+[![PyPI version](https://img.shields.io/pypi/v/pycaniuse.svg)](https://pypi.org/project/pycaniuse/)
+[![Python versions](https://img.shields.io/pypi/pyversions/pycaniuse.svg?logo=python&logoColor=white)](https://pypi.org/project/pycaniuse/)
+[![CI](https://github.com/viseshrp/pycaniuse/actions/workflows/main.yml/badge.svg)](https://github.com/viseshrp/pycaniuse/actions/workflows/main.yml)
+[![Coverage](https://codecov.io/gh/viseshrp/pycaniuse/branch/main/graph/badge.svg)](https://codecov.io/gh/viseshrp/pycaniuse)
+[![License: MIT](https://img.shields.io/github/license/viseshrp/pycaniuse)](https://github.com/viseshrp/pycaniuse/blob/main/LICENSE)
+[![Code Style: Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://black.readthedocs.io/en/stable/)
+[![Lint: Ruff](https://img.shields.io/badge/lint-ruff-000000.svg)](https://docs.astral.sh/ruff/)
+[![Typing: ty](https://img.shields.io/badge/typing-checked-blue.svg)](https://docs.astral.sh/ty/)
 
 It performs live HTML fetches and parsing, then renders compatibility data in either a quick basic view or an interactive full-screen view.
 
