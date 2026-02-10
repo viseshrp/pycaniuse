@@ -324,6 +324,24 @@ def _is_primary_ciu_feature(slug: str) -> bool:
     return not slug.startswith("mdn-") and not slug.startswith("wf-")
 
 
+def _build_baseline_note(
+    status: str | None,
+    low_date: str | None,
+    high_date: str | None,
+) -> str | None:
+    if status == "high":
+        if high_date:
+            return f"Baseline: Widely available across major browsers (since {high_date})."
+        return "Baseline: Widely available across major browsers."
+    if status == "low":
+        if low_date:
+            return f"Baseline: Newly available across major browsers (since {low_date})."
+        return "Baseline: Newly available across major browsers."
+    if status == "limited":
+        return "Baseline: Limited availability across major browsers."
+    return None
+
+
 def parse_feature_basic(html: str, slug: str) -> FeatureBasic:
     """Parse feature page content for basic mode."""
     doc = parse_document(html)
@@ -413,9 +431,18 @@ def parse_feature_full(html: str, slug: str) -> FeatureFull:
                 normalized_slug,
             )
 
+    baseline_note = _build_baseline_note(
+        baseline_status,
+        baseline_low_date,
+        baseline_high_date,
+    )
+    notes_tab_text = notes_text
+    if baseline_note:
+        notes_tab_text = f"{baseline_note}\n\n{notes_tab_text}" if notes_tab_text else baseline_note
+
     tabs: OrderedDict[str, str] = OrderedDict()
-    if notes_text:
-        tabs["Notes"] = notes_text
+    if notes_tab_text:
+        tabs["Notes"] = notes_tab_text
     if known_issues:
         tabs["Known issues"] = "\n".join([f"- {item}" for item in known_issues])
     if resources:

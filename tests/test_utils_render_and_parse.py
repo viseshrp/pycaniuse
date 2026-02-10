@@ -401,6 +401,47 @@ def test_parse_feature_full_uses_initial_data_and_dynamic_tabs(
     assert list(full.tabs.keys()) == ["Notes", "Known issues", "Resources", "Sub-features"]
 
 
+def test_parse_feature_full_adds_notes_tab_from_baseline_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    initial_payload = [
+        {
+            "id": "flexbox-gap",
+            "notes": "",
+            "bug_count": 0,
+            "link_count": 0,
+            "children": None,
+            "baseline_status": {
+                "status": "high",
+                "lowDate": "2021-04-26",
+                "highDate": "2023-10-26",
+            },
+        }
+    ]
+    encoded_initial = json.dumps(initial_payload).replace("\\", "\\\\").replace('"', '\\"')
+    html = f"""
+    <html><body>
+      <h1 class="feature-title">gap property for Flexbox</h1>
+      <div class="support-container">
+        <div class="support-list">
+          <h4 class="browser-heading browser--chrome">Chrome</h4>
+          <ol><li class="stat-cell y current" title="x">84-145</li></ol>
+        </div>
+      </div>
+      <script>window.initialFeatData = {{id: "flexbox-gap", data: "{encoded_initial}"}};</script>
+    </body></html>
+    """
+
+    monkeypatch.setattr(parse_feature_module, "fetch_feature_aux_data", lambda *_args: [])
+    monkeypatch.setattr(parse_feature_module, "fetch_support_data", lambda **_kwargs: {})
+
+    full = parse_feature_full(html, slug="flexbox-gap")
+
+    assert full.notes_text is None
+    assert "Notes" in full.tabs
+    assert "Baseline: Widely available across major browsers" in full.tabs["Notes"]
+
+
 def test_parse_support_range_text_colon_fallback_and_subfeature_filtering() -> None:
     class _NodeWithToText:
         def to_text(self) -> str:
