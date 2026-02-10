@@ -256,6 +256,9 @@ def test_fullscreen_layout_builder() -> None:
     assert layout["details"] is not None
     assert layout["footer"] is not None
 
+    wrapped = fs._build_layout(feature, state, _FakeConsole(width=120, height=40))
+    assert wrapped["feature"] is not None
+
 
 def test_textual_fullscreen_actions_delegate(monkeypatch: pytest.MonkeyPatch) -> None:
     from caniuse.ui import textual_fullscreen as tui_full
@@ -304,3 +307,32 @@ def test_textual_fullscreen_quit_action(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(app, "exit", lambda: called.__setitem__("exit", True))
     app.action_quit_app()
     assert called["exit"] is True
+
+
+def test_textual_fullscreen_lifecycle_and_runner(monkeypatch: pytest.MonkeyPatch) -> None:
+    from caniuse.ui import textual_fullscreen as tui_full
+
+    feature = _sample_feature_full()
+    app = tui_full._FeatureFullApp(feature)
+
+    frame = SimpleNamespace(update=lambda _obj: None)
+    monkeypatch.setattr(app, "query_one", lambda _selector, _cls: frame)
+    monkeypatch.setattr(
+        tui_full._FeatureFullApp,
+        "size",
+        property(lambda _self: SimpleNamespace(width=90, height=30)),
+    )
+
+    composed = list(app.compose())
+    assert len(composed) == 1
+    assert getattr(composed[0], "id", None) == "frame"
+
+    app.on_mount()
+    app.on_resize()
+
+    called = {"ran": False}
+    monkeypatch.setattr(
+        tui_full._FeatureFullApp, "run", lambda self: called.__setitem__("ran", True)
+    )
+    tui_full.run_textual_fullscreen(feature)
+    assert called["ran"] is True

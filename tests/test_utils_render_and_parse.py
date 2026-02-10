@@ -24,6 +24,7 @@ def test_text_utils_branches() -> None:
     assert text_utils.wrap_lines("alpha\n\nbeta", 5)
     assert text_utils.ellipsize("abc", 0) == ""
     assert text_utils.ellipsize("abc", 1) == "…"
+    assert text_utils.ellipsize("abc", 10) == "abc"
     assert text_utils.ellipsize("abcdef", 4) == "abc…"
     assert text_utils.extract_note_markers(("#1", "x", "#4")) == ["1", "4"]
 
@@ -178,6 +179,134 @@ def test_parse_search_results_keeps_html_fallback_when_api_fails(
     matches = parse_search_results(html)
 
     assert [match.slug for match in matches] == ["flexbox-gap", "multicolumn"]
+
+
+def test_parse_search_results_uses_input_query_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    html = """
+    <html>
+      <body>
+        <div class='section__search-results'></div>
+        <input id='feat_search' value='  gap  ' />
+        <div class='search-results'>
+          <a href='/flexbox-gap'>gap property for Flexbox</a>
+        </div>
+      </body>
+    </html>
+    """
+    monkeypatch.setattr(parse_search_module, "fetch_search_feature_ids", lambda _query: [])
+
+    matches = parse_search_results(html)
+
+    assert [match.slug for match in matches] == ["flexbox-gap"]
+
+
+def test_parse_search_results_ignores_blank_input_query_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    html = """
+    <html>
+      <body>
+        <div class='section__search-results'></div>
+        <input id='feat_search' value='   ' />
+        <div class='search-results'>
+          <a href='/flexbox-gap'>gap property for Flexbox</a>
+        </div>
+      </body>
+    </html>
+    """
+
+    def _boom(_query: str) -> list[str]:
+        raise AssertionError
+
+    monkeypatch.setattr(parse_search_module, "fetch_search_feature_ids", _boom)
+
+    matches = parse_search_results(html)
+    assert [match.slug for match in matches] == ["flexbox-gap"]
+
+
+def test_parse_search_results_ignores_missing_input_query_attr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    html = """
+    <html>
+      <body>
+        <div class='section__search-results'></div>
+        <input id='feat_search' />
+        <div class='search-results'>
+          <a href='/flexbox-gap'>gap property for Flexbox</a>
+        </div>
+      </body>
+    </html>
+    """
+
+    def _boom(_query: str) -> list[str]:
+        raise AssertionError
+
+    monkeypatch.setattr(parse_search_module, "fetch_search_feature_ids", _boom)
+
+    matches = parse_search_results(html)
+    assert [match.slug for match in matches] == ["flexbox-gap"]
+
+
+def test_parse_search_results_handles_malformed_support_data_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    html = """
+    <html>
+      <head><title>"gap" | Can I use</title></head>
+      <body><div class='search-results'><a href='/flexbox-gap'>Gap</a></div></body>
+    </html>
+    """
+    monkeypatch.setattr(
+        parse_search_module,
+        "fetch_search_feature_ids",
+        lambda _query: ["bad.id", "flexbox-gap", "mdn-css_properties_gap"],
+    )
+    monkeypatch.setattr(
+        parse_search_module,
+        "fetch_support_data",
+        lambda **_kwargs: {
+            "fullData": [
+                "bad-entry",
+                {"id": 1, "title": "wrong types"},
+                {"id": "flexbox-gap", "title": "gap property for Flexbox"},
+            ]
+        },
+    )
+
+    matches = parse_search_results(html)
+
+    assert [match.slug for match in matches] == ["flexbox-gap", "mdn-css_properties_gap"]
+    assert [match.title for match in matches] == [
+        "gap property for Flexbox",
+        "mdn-css_properties_gap",
+    ]
+
+
+def test_parse_search_results_uses_ids_when_support_payload_fetch_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    html = """
+    <html>
+      <head><title>"gap" | Can I use</title></head>
+      <body><div class='search-results'><a href='/flexbox-gap'>Gap</a></div></body>
+    </html>
+    """
+    monkeypatch.setattr(
+        parse_search_module,
+        "fetch_search_feature_ids",
+        lambda _query: ["flexbox-gap", "mdn-css_properties_gap"],
+    )
+
+    def _boom(**_kwargs: object) -> dict[str, object]:
+        raise parse_search_module.CaniuseError("boom")
+
+    monkeypatch.setattr(parse_search_module, "fetch_support_data", _boom)
+
+    matches = parse_search_results(html)
+
+    assert [match.slug for match in matches] == ["flexbox-gap", "mdn-css_properties_gap"]
+    assert [match.title for match in matches] == ["flexbox-gap", "mdn-css_properties_gap"]
 
 
 def test_render_basic_and_usage_branches() -> None:
@@ -492,3 +621,130 @@ def test_parse_support_range_text_colon_fallback_and_subfeature_filtering() -> N
     """
     full = parse_feature_full(html, slug="feature")
     assert full.subfeatures == [("Good", "https://caniuse.com/good")]
+
+
+def test_parse_feature_initial_payload_and_helpers_edge_cases() -> None:
+    assert (
+        parse_feature_module._parse_initial_feature_data(
+            '<script>window.initialFeatData = {id: "x", data: "not-json"};</script>'
+        )
+        is None
+    )
+
+    assert (
+        parse_feature_module._parse_initial_feature_data(
+            '<script>window.initialFeatData = {id: "x", data: "[]"};</script>'
+        )
+        is None
+    )
+
+    assert (
+        parse_feature_module._parse_initial_feature_data(
+            '<script>window.initialFeatData = {id: "x", data: "[1]"};</script>'
+        )
+        is None
+    )
+
+    issues = parse_feature_module._parse_known_issues(
+        [{"description": "  one  "}, {"description": ""}, {"description": 1}]
+    )
+    assert issues == ["one"]
+
+    resources = parse_feature_module._parse_resource_entries(
+        [
+            {"title": 1, "url": "https://example.com/x"},
+            {"title": " ", "url": "https://example.com/x"},
+            {"title": "Doc", "url": " "},
+            {"title": "Good", "url": "/ok"},
+        ]
+    )
+    assert resources == [("Good", "https://caniuse.com/ok")]
+
+    subfeatures = parse_feature_module._parse_subfeatures_from_initial_data(
+        {
+            "children": [
+                {"id": "Flexbox-Gap", "title": "Gap"},
+                {"id": "flexbox-gap", "title": "Gap duplicate"},
+                {"title": "Missing id"},
+                "mdn-css_properties_gap",
+            ]
+        }
+    )
+    assert subfeatures == [
+        ("Gap", "https://caniuse.com/flexbox-gap"),
+        ("mdn-css_properties_gap", "https://caniuse.com/mdn-css_properties_gap"),
+    ]
+
+
+def test_parse_feature_support_text_raw_fallback_and_api_error_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _NodeWithRawText:
+        def to_text(self) -> str:
+            return "TP"
+
+    assert _parse_support_range_text(_NodeWithRawText()) == "TP"
+
+    initial_payload = [
+        {"id": "flexbox", "bug_count": 1, "link_count": "unknown", "children": ["flexbox-gap"]}
+    ]
+    encoded_initial = json.dumps(initial_payload).replace("\\", "\\\\").replace('"', '\\"')
+    html = f"""
+    <html><body>
+      <h1 class="feature-title">Flexbox</h1>
+      <dl class="single-feat-resources"><dd><a href="/existing">Existing</a></dd></dl>
+      <dl><dt>Sub-features:</dt><dd><a href="/dom-sub">DOM sub</a></dd></dl>
+      <div class="support-container">
+        <div class="support-list">
+          <h4 class="browser-heading browser--chrome">Chrome</h4>
+          <ol><li class="stat-cell y current">1-2</li></ol>
+        </div>
+      </div>
+      <script>window.initialFeatData = {{id: "flexbox", data: "{encoded_initial}"}};</script>
+    </body></html>
+    """
+
+    calls: list[str] = []
+
+    def _boom_aux(_slug: str, data_type: str) -> list[dict[str, str]]:
+        calls.append(data_type)
+        raise parse_feature_module.CaniuseError("boom")
+
+    monkeypatch.setattr(parse_feature_module, "fetch_feature_aux_data", _boom_aux)
+
+    full = parse_feature_full(html, slug="flexbox")
+
+    assert calls == ["bugs"]
+    assert full.known_issues == []
+    assert full.resources == [("Existing", "https://caniuse.com/existing")]
+    assert full.subfeatures == [("DOM sub", "https://caniuse.com/dom-sub")]
+
+
+def test_parse_feature_full_ignores_links_fetch_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    initial_payload = [{"id": "flexbox", "bug_count": 0, "link_count": 1, "children": []}]
+    encoded_initial = json.dumps(initial_payload).replace("\\", "\\\\").replace('"', '\\"')
+    html = f"""
+    <html><body>
+      <h1 class="feature-title">Flexbox</h1>
+      <div class="support-container">
+        <div class="support-list">
+          <h4 class="browser-heading browser--chrome">Chrome</h4>
+          <ol><li class="stat-cell y current">1-2</li></ol>
+        </div>
+      </div>
+      <script>window.initialFeatData = {{id: "flexbox", data: "{encoded_initial}"}};</script>
+    </body></html>
+    """
+
+    calls: list[str] = []
+
+    def _boom_aux(_slug: str, data_type: str) -> list[dict[str, str]]:
+        calls.append(data_type)
+        raise parse_feature_module.CaniuseError("boom")
+
+    monkeypatch.setattr(parse_feature_module, "fetch_feature_aux_data", _boom_aux)
+
+    full = parse_feature_full(html, slug="flexbox")
+
+    assert calls == ["links"]
+    assert full.resources == []

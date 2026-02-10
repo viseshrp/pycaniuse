@@ -14,6 +14,7 @@ from caniuse.exceptions import ContentError, HttpStatusError, NetworkError, Requ
 class _FakeClient:
     plans: ClassVar[list[object]] = []
     seen_params: ClassVar[list[dict[str, str] | None]] = []
+    seen_form_data: ClassVar[list[dict[str, str] | None]] = []
 
     def __init__(self, **_: object) -> None:
         pass
@@ -43,10 +44,23 @@ class _FakeClient:
             )
         raise AssertionError
 
+    def post(self, url: str, data: dict[str, str] | None = None) -> httpx.Response:
+        _FakeClient.seen_form_data.append(data)
+        plan = _FakeClient.plans.pop(0)
+        if isinstance(plan, Exception):
+            raise plan
+        if isinstance(plan, tuple):
+            status_code, text = plan
+            return httpx.Response(
+                status_code, text=text, request=httpx.Request("POST", url, data=data)
+            )
+        raise AssertionError
+
 
 def _reset_plans(*plans: object) -> None:
     _FakeClient.plans = list(plans)
     _FakeClient.seen_params = []
+    _FakeClient.seen_form_data = []
 
 
 def test_caniuse_shim_exports_main() -> None:
@@ -371,3 +385,157 @@ def test_fetch_feature_aux_data_parses_entries(monkeypatch: pytest.MonkeyPatch) 
 
     assert calls == [(FEATURE_DATA_URL, {"feat": "flexbox", "type": "bugs"})]
     assert entries == [{"description": "one"}, {"description": "two"}]
+
+
+def test_post_form_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    _reset_plans((200, '{"ok":true}'))
+    monkeypatch.setattr(http.httpx, "Client", _FakeClient)
+
+    result = http._post_form("https://caniuse.com/data", {"type": "support-data"})
+
+    assert result == '{"ok":true}'
+    assert _FakeClient.seen_form_data[-1] == {"type": "support-data"}
+
+
+def test_post_form_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    timeout_exc = httpx.TimeoutException("slow")
+    _reset_plans(timeout_exc)
+    monkeypatch.setattr(http.httpx, "Client", _FakeClient)
+
+    with pytest.raises(RequestTimeoutError):
+        http._post_form("https://caniuse.com/data", {"type": "support-data"})
+
+
+def test_post_form_connect_retry_then_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    connect_exc = httpx.ConnectError("conn", request=httpx.Request("POST", "https://caniuse.com"))
+    _reset_plans(connect_exc, (200, '{"ok":true}'))
+    monkeypatch.setattr(http.httpx, "Client", _FakeClient)
+
+    result = http._post_form("https://caniuse.com/data", {"type": "support-data"})
+
+    assert result == '{"ok":true}'
+    assert len(_FakeClient.seen_form_data) == 2
+
+
+def test_post_form_connect_retry_then_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    connect_exc = httpx.ConnectError("conn", request=httpx.Request("POST", "https://caniuse.com"))
+    _reset_plans(connect_exc, connect_exc)
+    monkeypatch.setattr(http.httpx, "Client", _FakeClient)
+
+    with pytest.raises(NetworkError):
+        http._post_form("https://caniuse.com/data", {"type": "support-data"})
+
+
+def test_post_form_request_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    req_exc = httpx.RequestError("bad", request=httpx.Request("POST", "https://caniuse.com"))
+    _reset_plans(req_exc)
+    monkeypatch.setattr(http.httpx, "Client", _FakeClient)
+
+    with pytest.raises(NetworkError):
+        http._post_form("https://caniuse.com/data", {"type": "support-data"})
+
+
+def test_post_form_non_200(monkeypatch: pytest.MonkeyPatch) -> None:
+    _reset_plans((503, "error"))
+    monkeypatch.setattr(http.httpx, "Client", _FakeClient)
+
+    with pytest.raises(HttpStatusError):
+        http._post_form("https://caniuse.com/data", {"type": "support-data"})
+
+
+def test_post_form_empty_content(monkeypatch: pytest.MonkeyPatch) -> None:
+    _reset_plans((200, " "))
+    monkeypatch.setattr(http.httpx, "Client", _FakeClient)
+
+    with pytest.raises(ContentError):
+        http._post_form("https://caniuse.com/data", {"type": "support-data"})
+
+
+def test_fetch_search_feature_ids_non_dict_payload_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        http,
+        "fetch_html",
+        lambda url, params=None, timeout=10.0, allow_static_fallback=False: "[]",
+    )
+
+    with pytest.raises(ContentError):
+        http.fetch_search_feature_ids("gap")
+
+
+def test_fetch_search_feature_ids_non_list_ids_returns_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        http,
+        "fetch_html",
+        lambda url, params=None, timeout=10.0, allow_static_fallback=False: '{"featureIds":"gap"}',
+    )
+
+    assert http.fetch_search_feature_ids("gap") == []
+
+
+def test_fetch_support_data_without_feature_ids_returns_empty() -> None:
+    assert http.fetch_support_data() == {}
+    assert http.fetch_support_data(full_data_feats=[], meta_data_feats=[]) == {}
+
+
+def test_fetch_support_data_invalid_payload_type_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(http, "_post_form", lambda url, form_data, timeout=10.0: "[]")
+
+    with pytest.raises(ContentError):
+        http.fetch_support_data(full_data_feats=["flexbox"])
+
+
+def test_fetch_feature_aux_data_non_list_payload_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        http,
+        "fetch_html",
+        lambda url, params=None, timeout=10.0, allow_static_fallback=False: '{"description":"one"}',
+    )
+
+    with pytest.raises(ContentError):
+        http.fetch_feature_aux_data("flexbox", "bugs")
+
+
+def test_post_form_uses_shared_client_when_timeout_is_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _TrackingClient(_FakeClient):
+        instances: ClassVar[int] = 0
+
+        def __init__(self, **kwargs: object) -> None:
+            _ = kwargs
+            _TrackingClient.instances += 1
+
+    _TrackingClient.instances = 0
+    _reset_plans((200, "<html>one</html>"), (200, '{"ok":true}'))
+    monkeypatch.setattr(http.httpx, "Client", _TrackingClient)
+
+    with http.use_shared_client():
+        assert http.fetch_html("https://caniuse.com/one") == "<html>one</html>"
+        assert (
+            http._post_form("https://caniuse.com/data", {"type": "support-data"}) == '{"ok":true}'
+        )
+
+    assert _TrackingClient.instances == 1
+
+
+def test_fetch_support_data_posts_only_full_ids_when_meta_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, object] = {}
+
+    def _fake_post_form(url: str, form_data: dict[str, str], timeout: float = 10.0) -> str:
+        seen["url"] = url
+        seen["form_data"] = dict(form_data)
+        seen["timeout"] = timeout
+        return '{"fullData":[]}'
+
+    monkeypatch.setattr(http, "_post_form", _fake_post_form)
+
+    payload = http.fetch_support_data(full_data_feats=["flexbox"])
+
+    assert seen["url"] == FEATURE_DATA_URL
+    assert seen["timeout"] == 10.0
+    assert seen["form_data"] == {"type": "support-data", "fullDataFeats": "flexbox"}
+    assert payload == {"fullData": []}
