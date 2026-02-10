@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -425,3 +426,49 @@ def test_basic_mode_warning_prints(monkeypatch: MonkeyPatch) -> None:
     result = runner.invoke(cli.main, ["flexbox"])
     assert result.exit_code == 0
     assert "Some sections could not be parsed" in result.output
+
+
+def test_basic_mode_does_not_import_textual(monkeypatch: MonkeyPatch) -> None:
+    runner = CliRunner()
+
+    monkeypatch.setattr(cli, "fetch_search_page", lambda _query: "search")
+    monkeypatch.setattr(
+        cli,
+        "parse_search_results",
+        lambda _html: [SearchMatch(slug="flexbox", title="Flexbox", href="/flexbox")],
+    )
+    monkeypatch.setattr(cli, "fetch_feature_page", lambda _slug: "feature")
+    monkeypatch.setattr(
+        cli,
+        "parse_feature_basic",
+        lambda _html, slug: FeatureBasic(
+            slug=slug,
+            title="Flexbox",
+            spec_url=None,
+            spec_status=None,
+            usage_supported=None,
+            usage_partial=None,
+            usage_total=None,
+            description_text="",
+            browser_blocks=[],
+            parse_warnings=[],
+        ),
+    )
+    monkeypatch.setattr(cli, "render_basic", lambda feature_basic: feature_basic.title)
+
+    original_import = builtins.__import__
+
+    def _guarded_import(
+        name: str,
+        globals_: object | None = None,
+        locals_: object | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> object:
+        if name.startswith("textual"):
+            raise AssertionError
+        return original_import(name, globals_, locals_, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", _guarded_import)
+    result = runner.invoke(cli.main, ["flexbox"])
+    assert result.exit_code == 0

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 from types import SimpleNamespace
 
 import pytest
@@ -8,7 +9,6 @@ from rich.text import Text
 from caniuse.model import BrowserSupportBlock, FeatureFull, SearchMatch, SupportRange
 from caniuse.ui import fullscreen as fs
 from caniuse.ui import select as ui_select
-from caniuse.ui import textual_fullscreen as tui_full
 
 
 class _FakeInOut:
@@ -111,6 +111,33 @@ def test_select_match_retries_and_cancel(monkeypatch: pytest.MonkeyPatch) -> Non
     assert ui_select.select_match(matches) is None
 
 
+def test_select_match_interactive_does_not_import_textual(monkeypatch: pytest.MonkeyPatch) -> None:
+    matches = [
+        SearchMatch(slug="a", title="A", href="/a"),
+        SearchMatch(slug="b", title="B", href="/b"),
+    ]
+    monkeypatch.setattr(ui_select.sys, "stdin", _FakeInOut(True))
+    monkeypatch.setattr(ui_select.sys, "stdout", _FakeInOut(True))
+    monkeypatch.setattr(ui_select, "Console", lambda: _FakeConsole())
+    monkeypatch.setattr(ui_select.Prompt, "ask", lambda *_a, **_k: "1")
+
+    original_import = builtins.__import__
+
+    def _guarded_import(
+        name: str,
+        globals_: object | None = None,
+        locals_: object | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> object:
+        if name.startswith("textual"):
+            raise AssertionError
+        return original_import(name, globals_, locals_, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", _guarded_import)
+    assert ui_select.select_match(matches) == "a"
+
+
 def test_fullscreen_static_and_tty_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     feature = _sample_feature_full()
 
@@ -126,10 +153,34 @@ def test_fullscreen_static_and_tty_paths(monkeypatch: pytest.MonkeyPatch) -> Non
         called["textual"] = True
         assert arg is feature
 
+    from caniuse.ui import textual_fullscreen as tui_full
+
     monkeypatch.setattr(fs.sys, "stdout", _FakeInOut(True))
     monkeypatch.setattr(tui_full, "run_textual_fullscreen", _run_textual)
     fs.run_fullscreen(feature)
     assert called["textual"] is True
+
+
+def test_fullscreen_non_tty_does_not_import_textual(monkeypatch: pytest.MonkeyPatch) -> None:
+    feature = _sample_feature_full()
+    monkeypatch.setattr(fs, "Console", lambda: _FakeConsole())
+    monkeypatch.setattr(fs.sys, "stdout", _FakeInOut(False))
+
+    original_import = builtins.__import__
+
+    def _guarded_import(
+        name: str,
+        globals_: object | None = None,
+        locals_: object | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> object:
+        if name.startswith("textual"):
+            raise AssertionError
+        return original_import(name, globals_, locals_, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", _guarded_import)
+    fs.run_fullscreen(feature)
 
 
 def test_fullscreen_render_helpers_cover_core_paths() -> None:
@@ -206,6 +257,8 @@ def test_fullscreen_layout_builder() -> None:
 
 
 def test_textual_fullscreen_actions_delegate(monkeypatch: pytest.MonkeyPatch) -> None:
+    from caniuse.ui import textual_fullscreen as tui_full
+
     feature = _sample_feature_full()
     app = tui_full._FeatureFullApp(feature)
 
@@ -243,6 +296,8 @@ def test_textual_fullscreen_actions_delegate(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_textual_fullscreen_quit_action(monkeypatch: pytest.MonkeyPatch) -> None:
+    from caniuse.ui import textual_fullscreen as tui_full
+
     app = tui_full._FeatureFullApp(_sample_feature_full())
     called = {"exit": False}
     monkeypatch.setattr(app, "exit", lambda: called.__setitem__("exit", True))
