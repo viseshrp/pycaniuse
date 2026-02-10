@@ -124,8 +124,7 @@ def test_parse_feature_full_includes_tabs_and_all_browsers() -> None:
     parsed = parse_feature_full(FEATURE_HTML, slug="flexbox")
 
     assert [block.browser_key for block in parsed.browser_blocks][-1] == "kaios"
-    assert list(parsed.tabs.keys()) == ["Notes", "Resources", "Sub-features"]
-    assert parsed.notes_text is not None
+    assert list(parsed.tabs.keys()) == ["Resources", "Sub-features"]
     assert len(parsed.resources) == 2
     assert parsed.subfeatures == [
         ("gap property for Flexbox", "https://caniuse.com/flexbox-gap"),

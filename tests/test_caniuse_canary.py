@@ -111,9 +111,6 @@ def test_caniuse_feature_page_html_shape_is_parseable_live() -> None:
     ), "No stat cell contained direct #text child content for range parsing."
 
     # Full-mode optional sections our parser reads.
-    notes_node = first(doc, "div.single-page__notes")
-    assert notes_node is not None
-    assert text(notes_node)
     resources_nodes = all_nodes(doc, "dl.single-feat-resources dd a")
     assert resources_nodes
     assert any(attr(node, "href") and text(node) for node in resources_nodes)
@@ -128,10 +125,9 @@ def test_caniuse_feature_page_html_shape_is_parseable_live() -> None:
     assert full_feature.title
     assert full_feature.spec_url is not None
     assert full_feature.browser_blocks
-    assert full_feature.notes_text is not None
     assert full_feature.resources
     assert full_feature.subfeatures
-    assert {"Notes", "Resources", "Sub-features"}.issubset(full_feature.tabs.keys())
+    assert {"Resources", "Sub-features"}.issubset(full_feature.tabs.keys())
 
     basic_feature = parse_feature_basic(feature_html, slug=slug)
     assert basic_feature.parse_warnings == []

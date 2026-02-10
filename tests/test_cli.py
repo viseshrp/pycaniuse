@@ -167,7 +167,6 @@ def test_full_mode_warning_prints(monkeypatch: MonkeyPatch) -> None:
                 )
             ],
             parse_warnings=["support"],
-            notes_text=None,
             resources=[],
             subfeatures=[],
             tabs={},

@@ -9,7 +9,7 @@ from typing import Literal, cast
 
 from .constants import BASE_URL, BASIC_MODE_BROWSERS
 from .exceptions import CaniuseError
-from .http import fetch_feature_aux_data, fetch_support_data
+from .http import fetch_feature_aux_data
 from .model import BrowserSupportBlock, FeatureBasic, FeatureFull, SupportRange
 from .util.html import (
     all_nodes,
@@ -156,14 +156,6 @@ def _parse_support_range_text(stat_cell: object) -> str:
     return raw
 
 
-def _parse_notes(doc: object) -> str | None:
-    notes_node = first(doc, "div.single-page__notes")
-    if notes_node is None:
-        return None
-    notes = markdown_text(notes_node) or text(notes_node)
-    return notes or None
-
-
 def _parse_resources(doc: object) -> list[tuple[str, str]]:
     resources: list[tuple[str, str]] = []
     for anchor in all_nodes(doc, "dl.single-feat-resources dd a"):
@@ -215,52 +207,6 @@ def _parse_initial_feature_data(html: str) -> dict[str, object] | None:
     return first_item
 
 
-def _clean_date(value: object) -> str | None:
-    if not isinstance(value, str):
-        return None
-    cleaned = value.strip().lstrip("≤").strip()
-    return cleaned or None
-
-
-def _parse_baseline_fields(data: dict[str, object]) -> tuple[str | None, str | None, str | None]:
-    baseline = data.get("baseline_status")
-    if not isinstance(baseline, dict):
-        baseline = data.get("baselineStatus")
-    if not isinstance(baseline, dict):
-        return None, None, None
-    baseline_map = cast(dict[str, object], baseline)
-
-    raw_status = baseline_map.get("status")
-    status = raw_status.strip().lower() if isinstance(raw_status, str) else None
-    low_date = _clean_date(baseline_map.get("lowDate") or baseline_map.get("low_date"))
-    high_date = _clean_date(baseline_map.get("highDate") or baseline_map.get("high_date"))
-    return status, low_date, high_date
-
-
-def _parse_baseline_from_metadata(
-    payload: dict[str, object],
-    slug: str,
-) -> tuple[str | None, str | None, str | None]:
-    meta_data = payload.get("metaData")
-    if not isinstance(meta_data, list):
-        return None, None, None
-
-    for item in meta_data:
-        if not isinstance(item, dict):
-            continue
-        item_map = cast(dict[str, object], item)
-        item_id = item_map.get("id")
-        if not isinstance(item_id, str) or item_id.strip().lower() != slug:
-            continue
-        raw_status = item_map.get("baselineStatus")
-        status = raw_status.strip().lower() if isinstance(raw_status, str) else None
-        low_date = _clean_date(item_map.get("baselineLowDate"))
-        high_date = _clean_date(item_map.get("baselineHighDate"))
-        return status, low_date, high_date
-
-    return None, None, None
-
-
 def _parse_known_issues(entries: list[dict[str, object]]) -> list[str]:
     issues: list[str] = []
     for entry in entries:
@@ -270,33 +216,6 @@ def _parse_known_issues(entries: list[dict[str, object]]) -> list[str]:
             if cleaned:
                 issues.append(cleaned)
     return issues
-
-
-def _parse_numbered_notes(data: dict[str, object] | None) -> list[str]:
-    if not isinstance(data, dict):
-        return []
-    raw_notes = data.get("notes_by_num")
-    if not isinstance(raw_notes, dict):
-        raw_notes = data.get("notesByNum")
-    if not isinstance(raw_notes, dict):
-        return []
-
-    def _note_sort_key(item: tuple[object, object]) -> tuple[int, str]:
-        key = str(item[0]).strip()
-        if key.isdigit():
-            return (0, f"{int(key):08d}")
-        return (1, key)
-
-    output: list[str] = []
-    for key_obj, value in sorted(raw_notes.items(), key=_note_sort_key):
-        key = str(key_obj).strip()
-        if not key:
-            continue
-        if isinstance(value, str):
-            cleaned = value.strip()
-            if cleaned:
-                output.append(f"[{key}] {cleaned}")
-    return output
 
 
 def _parse_resource_entries(entries: list[dict[str, object]]) -> list[tuple[str, str]]:
@@ -351,74 +270,6 @@ def _is_primary_ciu_feature(slug: str) -> bool:
     return not slug.startswith("mdn-") and not slug.startswith("wf-")
 
 
-def _is_mdn_feature(slug: str) -> bool:
-    return slug.startswith("mdn-")
-
-
-def _is_wf_feature(slug: str) -> bool:
-    return slug.startswith("wf-")
-
-
-def _build_baseline_note(
-    status: str | None,
-    low_date: str | None,
-    high_date: str | None,
-) -> str | None:
-    if status not in {"high", "low"}:
-        return None
-    since_date = low_date or high_date
-    if since_date:
-        try:
-            year, month, _day = since_date.split("-")
-            month_name = (
-                "January",
-                "February",
-                "March",
-                "April",
-                "May",
-                "June",
-                "July",
-                "August",
-                "September",
-                "October",
-                "November",
-                "December",
-            )[max(1, min(12, int(month))) - 1]
-        except (ValueError, IndexError):
-            return "This feature works across the latest devices and major browser versions."
-        return (
-            f"Since {month_name} {year}, this feature works across the latest devices and "
-            "major browser versions."
-        )
-    return "This feature works across the latest devices and major browser versions."
-
-
-def _build_mdn_attribution_note(initial_data: dict[str, object] | None) -> str | None:
-    if not isinstance(initial_data, dict):
-        return None
-
-    mdn_url = initial_data.get("mdn_url")
-    path = initial_data.get("path")
-    lines = ["Support data for this feature provided by MDN browser-compat-data."]
-    if isinstance(mdn_url, str) and mdn_url.strip():
-        lines.append(f"MDN reference: {mdn_url.strip()}")
-    if isinstance(path, str) and path.strip():
-        lines.append(
-            f"Source data: https://github.com/mdn/browser-compat-data/blob/main/{path.strip()}"
-        )
-    return "\n".join(lines) if lines else None
-
-
-def _build_wf_attribution_note(slug: str) -> str:
-    feature_id = slug.removeprefix("wf-")
-    return (
-        "Support data for this feature provided by the web-features project.\n"
-        "Contributing docs: "
-        "https://github.com/web-platform-dx/web-features/blob/main/docs/CONTRIBUTING.md\n"
-        f"Feature source: https://github.com/web-platform-dx/web-features/blob/main/features/{feature_id}.yml"
-    )
-
-
 def parse_feature_basic(html: str, slug: str) -> FeatureBasic:
     """Parse feature page content for basic mode."""
     doc = parse_document(html)
@@ -455,27 +306,13 @@ def parse_feature_full(html: str, slug: str) -> FeatureFull:
     usage_supported, usage_partial, usage_total = _parse_usage(doc)
     browser_blocks = _parse_support_blocks(doc, include_all=True)
 
-    notes_text = _parse_notes(doc)
-    if not notes_text and isinstance(initial_data, dict):
-        initial_notes = initial_data.get("notes")
-        if isinstance(initial_notes, str) and initial_notes.strip():
-            notes_text = initial_notes.strip()
-    numbered_notes = _parse_numbered_notes(initial_data)
-
     known_issues: list[str] = []
     resources = _parse_resources(doc)
     subfeatures = _parse_subfeatures(doc)
-    baseline_status: str | None = None
-    baseline_low_date: str | None = None
-    baseline_high_date: str | None = None
 
     if isinstance(initial_data, dict):
         if not subfeatures:
             subfeatures = _parse_subfeatures_from_initial_data(initial_data)
-
-        baseline_status, baseline_low_date, baseline_high_date = _parse_baseline_fields(
-            initial_data
-        )
 
         if _is_primary_ciu_feature(normalized_slug):
             bug_count = initial_data.get("bug_count")
@@ -499,47 +336,7 @@ def parse_feature_full(html: str, slug: str) -> FeatureFull:
                 except CaniuseError:
                     pass
 
-        if baseline_status is None:
-            try:
-                metadata_payload = fetch_support_data(meta_data_feats=[normalized_slug])
-            except CaniuseError:
-                metadata_payload = {}
-            baseline_status, baseline_low_date, baseline_high_date = _parse_baseline_from_metadata(
-                metadata_payload,
-                normalized_slug,
-            )
-
-    baseline_note = _build_baseline_note(baseline_status, baseline_low_date, baseline_high_date)
-    notes_parts: list[str] = []
-    if _is_mdn_feature(normalized_slug):
-        if notes_text:
-            notes_parts.append(notes_text)
-        if numbered_notes:
-            notes_parts.append("\n".join(numbered_notes))
-        mdn_note = _build_mdn_attribution_note(initial_data)
-        if mdn_note:
-            notes_parts.append(mdn_note)
-    elif _is_wf_feature(normalized_slug):
-        if baseline_note:
-            notes_parts.append(baseline_note)
-        if notes_text:
-            notes_parts.append(notes_text)
-        if numbered_notes:
-            notes_parts.append("\n".join(numbered_notes))
-        notes_parts.append(_build_wf_attribution_note(normalized_slug))
-    else:
-        if baseline_note:
-            notes_parts.append(baseline_note)
-        if notes_text:
-            notes_parts.append(notes_text)
-        if numbered_notes:
-            notes_parts.append("\n".join(numbered_notes))
-
-    notes_tab_text = "\n\n".join([part for part in notes_parts if part.strip()]) or None
-
     tabs: OrderedDict[str, str] = OrderedDict()
-    if notes_tab_text:
-        tabs["Notes"] = notes_tab_text
     if known_issues:
         tabs["Known issues"] = "\n".join([f"- {item}" for item in known_issues])
     if resources:
@@ -562,12 +359,8 @@ def parse_feature_full(html: str, slug: str) -> FeatureFull:
         description_text=_parse_description(doc),
         browser_blocks=browser_blocks,
         parse_warnings=parse_warnings,
-        notes_text=notes_text,
         known_issues=known_issues,
         resources=resources,
         subfeatures=subfeatures,
-        baseline_status=baseline_status,
-        baseline_low_date=baseline_low_date,
-        baseline_high_date=baseline_high_date,
         tabs=dict(tabs),
     )
